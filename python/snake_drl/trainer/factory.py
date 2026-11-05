@@ -122,9 +122,7 @@ def build_algorithm(
             replay,
             optimizer,
             runtime.device,
-            epsilon=LinearSchedule(
-                dqn_cfg.eps_start, dqn_cfg.eps_end, dqn_cfg.eps_decay_steps
-            ),
+            epsilon=LinearSchedule(dqn_cfg.eps_start, dqn_cfg.eps_end, dqn_cfg.eps_decay_steps),
             beta=LinearSchedule(cfg.buffer.beta0, 1.0, cfg.buffer.beta_steps),
             total_steps=horizon,
         )

@@ -22,7 +22,12 @@ def optimizer_step(
     *,
     max_grad_norm: float = 0.0,
 ) -> None:
-    """Backpropagate ``loss`` and apply one optimizer step."""
+    """Backpropagate ``loss`` and apply one optimizer step.
+
+    ``parameters`` must be re-iterable (a list, not a one-shot generator): if it
+    is consumed by the clipping call, later steps silently stop clipping.  The
+    algorithms store ``list(policy.parameters())`` for exactly this reason.
+    """
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     if max_grad_norm > 0.0:

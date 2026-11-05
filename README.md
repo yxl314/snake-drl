@@ -140,7 +140,7 @@ Measured on an 8-vCPU aarch64 box (details in the design document):
 ## Tests and code quality
 
 ```bash
-pytest -q                                    # 69 tests, CPU, ~2-5 min
+pytest -q                                    # 70 tests, CPU, ~2-5 min
 ruff check python/snake_drl tests            # E,F,W,I,UP,B,SIM
 ruff format --check python/snake_drl tests --exclude python/snake_drl/play
 mypy python/snake_drl                        # 49 files, Qt front-end excluded

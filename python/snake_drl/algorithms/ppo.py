@@ -50,6 +50,9 @@ class PPO(Algorithm):
             device=device,
         )
         self._obs: torch.Tensor | None = None
+        # Materialise once: a fresh generator per minibatch would be fine, but a
+        # single stored generator would be exhausted by the first clip call.
+        self._parameters = list(policy.parameters())
 
     # ------------------------------------------------------------------ core
     def _iterate(self) -> dict[str, float]:
@@ -128,7 +131,6 @@ class PPO(Algorithm):
         cfg = self.cfg
         total = adv.shape[0]
         minibatch = self._minibatch
-        parameters = self.policy.parameters()
         rows: list[torch.Tensor] = []
         permutation = torch.randperm(total, device=self.device)
         stop = False
@@ -154,7 +156,9 @@ class PPO(Algorithm):
                 value_loss = self._value_loss(value, old_value, mb_ret)
                 loss = surrogate + cfg.value_coef * value_loss - cfg.entropy_coef * entropy.mean()
 
-                optimizer_step(self.optimizer, parameters, loss, max_grad_norm=cfg.max_grad_norm)
+                optimizer_step(
+                    self.optimizer, self._parameters, loss, max_grad_norm=cfg.max_grad_norm
+                )
                 self.updates += 1
 
                 with torch.no_grad():

@@ -98,6 +98,7 @@ class DQN(Algorithm):
         # Update credit is counted in transitions, so the update rate does not
         # silently shrink when ``num_envs`` grows.
         self._credit = 0
+        self._parameters = list(policy.parameters())
         self.target_policy.eval()
         for param in self.target_policy.parameters():
             param.requires_grad_(False)
@@ -168,12 +169,7 @@ class DQN(Algorithm):
 
         td_error = q - target
         loss = (batch.weights * F.smooth_l1_loss(q, target, reduction="none")).mean()
-        optimizer_step(
-            self.optimizer,
-            self.policy.parameters(),
-            loss,
-            max_grad_norm=cfg.max_grad_norm,
-        )
+        optimizer_step(self.optimizer, self._parameters, loss, max_grad_norm=cfg.max_grad_norm)
         self.replay.update_priorities(batch.indices, td_error.detach())
         self.updates += 1
         return torch.stack((loss.detach(), q.mean(), target.mean(), td_error.abs().mean()))

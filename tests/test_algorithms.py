@@ -178,3 +178,31 @@ def test_q_target_requires_online_values_for_double_q():
             0.99,
             double_q=True,
         )
+
+
+def test_ppo_clips_gradients_on_every_minibatch(monkeypatch):
+    """A one-shot parameters iterator would make clipping stop after step one."""
+    seen: list[int] = []
+    original = torch.nn.utils.clip_grad_norm_
+
+    def spy(parameters, max_norm, *args, **kwargs):
+        batch = list(parameters)
+        seen.append(len(batch))
+        return original(batch, max_norm, *args, **kwargs)
+
+    monkeypatch.setattr(torch.nn.utils, "clip_grad_norm_", spy)
+    raw = _bandit_config()
+    raw["algorithm"] = {
+        "type": "ppo",
+        "lr": 3e-3,
+        "n_steps": 16,
+        "minibatch_size": 64,
+        "epochs": 2,
+    }
+    _, algorithm = _algorithm(raw)
+    algorithm.iterate()
+    algorithm.close()
+
+    minibatches_per_epoch = (16 * 16) // 64
+    assert len(seen) == 2 * minibatches_per_epoch
+    assert all(count > 0 for count in seen), seen

@@ -427,7 +427,7 @@ checkpoint 自带的配置之上**（不是另找一份配置），因此不会�
 | `test_algorithms.py` | DQN/DDQN 目标、截断 bootstrap、GAE vs 朴素实现、PER 回写、四算法在老虎机上收敛 |
 | `test_trainer.py` | 端到端训练、指标/评估/checkpoint 文件、断点恢复、步数上限、total_steps 一致性、eval 覆盖优先级 |
 
-共 69 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
+共 70 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
 
 ```bash
 pytest -q
@@ -576,3 +576,12 @@ snake-drl eval -m runs/<run>/latest.pt --episodes 20
 - 指标继续"一次 iterate 一次同步"；PPO 的统计量改为一次 `stack` + 一次 `tolist()`。
 - 训练结束时不再重复评估/重复写 checkpoint：`EvalCallback` 与 `CheckpointCallback`
   记录最后一步，`on_end` 只在最后一步尚未处理时才执行。
+
+### 17.7 审查中发现的缺陷
+
+- **PPO 的梯度裁剪只生效一次**：`_run_epochs` 把 `policy.parameters()` 生成器存进局部变量，
+  第一次 `clip_grad_norm_` 就把它耗尽，后续 minibatch 实际不再裁剪。
+  现在两个算法都在构造时物化 `self._parameters = list(policy.parameters())`，
+  `optimizer_step` 的文档也写明"必须可重复迭代"；新增的回归测试用 spy 统计每次裁剪的
+  参数个数，旧实现会在第二次之后出现 0。
+- 训练最后一步重复评估/重复写 checkpoint（已由 §17.6 的末步记录去掉）。
