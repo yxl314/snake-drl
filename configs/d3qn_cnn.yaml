@@ -1,0 +1,44 @@
+# Dueling Double DQN + prioritized replay + CNN, 10x10 board.
+run:
+  name: d3qn_cnn
+  seed: 0
+  device: auto
+  output_dir: runs
+env:
+  type: snake
+  num_envs: 256
+  width: 10
+  height: 10
+  max_episode_steps: 500
+  action_mode: relative
+network:
+  encoder:
+    type: cnn
+    frames: 1
+    feature_dim: 256
+    cnn_channels: [32, 64, 64]
+  head: auto
+  ortho_init: true
+buffer:
+  type: prioritized
+  capacity: 100000
+  alpha: 0.6
+  beta0: 0.4
+  beta_steps: 200000
+algorithm:
+  type: d3qn
+  lr: 0.0001
+  batch_size: 256
+  gamma: 0.99
+  target_update: 1000
+  learning_starts: 5000
+  gradient_steps: 1
+  eps_start: 1.0
+  eps_end: 0.05
+  eps_decay_steps: 200000
+train:
+  total_steps: 500000
+  log_every: 5000
+  eval_every: 50000
+  eval_episodes: 20
+  save_every: 100000

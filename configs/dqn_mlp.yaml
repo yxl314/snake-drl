@@ -1,0 +1,35 @@
+# Plain DQN + uniform replay + MLP on an 8x8 board: the fast CPU smoke test.
+run:
+  name: dqn_mlp
+  seed: 0
+  device: auto
+  output_dir: runs
+env:
+  type: snake
+  num_envs: 256
+  width: 8
+  height: 8
+  max_episode_steps: 300
+network:
+  encoder:
+    type: mlp
+    frames: 1
+    hidden_dims: [256, 256]
+  head: auto
+buffer:
+  type: uniform
+  capacity: 50000
+algorithm:
+  type: dqn
+  lr: 0.0003
+  batch_size: 256
+  gamma: 0.99
+  target_update: 500
+  learning_starts: 2000
+  eps_decay_steps: 100000
+train:
+  total_steps: 200000
+  log_every: 5000
+  eval_every: 25000
+  eval_episodes: 20
+  save_every: 50000

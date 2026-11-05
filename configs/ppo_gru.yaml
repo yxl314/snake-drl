@@ -1,0 +1,28 @@
+# Temporal encoder demo: GRU over the last 4 frames.
+run:
+  name: ppo_gru
+  seed: 0
+  device: auto
+  output_dir: runs
+env:
+  type: snake
+  num_envs: 128
+  width: 8
+  height: 8
+  max_episode_steps: 300
+network:
+  encoder:
+    type: gru
+    frames: 4
+    feature_dim: 128
+    gru_hidden: 128
+algorithm:
+  type: ppo
+  lr: 0.0003
+  n_steps: 64
+  minibatch_size: 256
+train:
+  total_steps: 200000
+  log_every: 2000
+  eval_every: 20000
+  save_every: 40000

@@ -1,0 +1,37 @@
+# PPO + CNN on a 10x10 board.
+run:
+  name: ppo_cnn
+  seed: 0
+  device: auto
+  output_dir: runs
+env:
+  type: snake
+  num_envs: 256
+  width: 10
+  height: 10
+  max_episode_steps: 500
+network:
+  encoder:
+    type: cnn
+    frames: 1
+    feature_dim: 256
+    cnn_channels: [32, 64, 64]
+  head: actor_critic
+algorithm:
+  type: ppo
+  lr: 0.0003
+  n_steps: 128
+  epochs: 4
+  minibatch_size: 256
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+  lr_schedule: linear
+train:
+  total_steps: 1000000
+  log_every: 5000
+  eval_every: 50000
+  eval_episodes: 20
+  save_every: 100000
