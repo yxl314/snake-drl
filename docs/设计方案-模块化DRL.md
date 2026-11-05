@@ -328,6 +328,7 @@ Q = V + A - mean(A)                                  # dueling head
 | grid 观测拷贝 1024 envs | 25.8 µs（30 GB/s） | 与 step 同量级，因此观测必须少拷贝 |
 | 位棋盘解码 | 285 µs（+拷贝 426 µs） | 比直接拷 grid 慢 11–16×，弃用 |
 | 窗口平移（256 envs, T=4, 4 线程） | ~20 µs，原地 `copy_` | 预分配 + 原地平移，不做 `cat` 分配 |
+| 单帧窗口（T=1） | 双缓冲交换后 `runner.step` 4.84 ms → **0.775 ms** | 不为 `(B,1,C,H,W)` 做跨步写 |
 | 视图创建 | 1.8 µs | 每次 step 的 Python 开销可接受 |
 
 端到端（env step + 采集 + 256 批 CNN 前向）：
@@ -363,6 +364,8 @@ PER：采样 256 条 67 µs、更新 256 个优先级 40 µs，相对一次 DQN 
 8. 线性层走 `FastLinear`；`SNAKE_DRL_LINEAR=addmm` 可关闭。
 9. 不默认开 `torch.compile` / AMP：前者首次编译开销大且 aarch64 稳定性未知，
    后者只对 CUDA 有意义；都通过配置留作扩展。
+10. T=1 的窗口用双缓冲（`_frame` / `_frame_alt`）交换，避免向
+    `(B,1,C,H,W)` 的跨步切片写入；T>1 才做整窗平移。
 
 ### 11.4 内存公式
 
