@@ -48,19 +48,38 @@ def test_gae_matches_naive_reference():
     rewards = torch.randn(steps, envs)
     values = torch.randn(steps, envs)
     next_values = torch.randn(steps, envs)
-    terminated = (torch.rand(steps, envs) > 0.75).float()
+    terminated = torch.rand(steps, envs) > 0.80
+    truncated = (torch.rand(steps, envs) > 0.85) & ~terminated
+    done = terminated | truncated
 
-    adv, ret = compute_gae(rewards, values, next_values, terminated.bool(), 0.99, 0.95)
+    adv, ret = compute_gae(
+        rewards, values, next_values, terminated, truncated, 0.99, 0.95
+    )
 
     reference = np.zeros((steps, envs))
     last = np.zeros(envs)
     for t in reversed(range(steps)):
         nonterm = 1.0 - terminated[t].numpy()
+        cut = 1.0 - done[t].numpy()
         delta = rewards[t].numpy() + 0.99 * next_values[t].numpy() * nonterm - values[t].numpy()
-        last = delta + 0.99 * 0.95 * nonterm * last
+        last = delta + 0.99 * 0.95 * cut * last
         reference[t] = last
     assert np.allclose(adv.numpy(), reference, atol=1e-6)
     assert torch.allclose(ret, adv + values, atol=1e-6)
+
+
+def test_gae_truncation_bootstraps_without_leaking_the_next_episode():
+    """A truncated step bootstraps, but the trace must not continue into the
+    auto-reset episode's reward."""
+    rewards = torch.tensor([[0.0], [0.0], [1.0]])
+    values = torch.zeros(3, 1)
+    next_values = torch.tensor([[0.0], [1.0], [0.0]])
+    terminated = torch.zeros(3, 1, dtype=torch.bool)
+    truncated = torch.tensor([[False], [True], [False]])
+
+    adv, _ = compute_gae(rewards, values, next_values, terminated, truncated, 0.9, 0.9)
+    # t=1 bootstraps from V(final)=1 and stops; t=0 only carries t=1.
+    assert adv.flatten().tolist() == pytest.approx([0.729, 0.9, 1.0])
 
 
 def test_dueling_head_centres_advantage():

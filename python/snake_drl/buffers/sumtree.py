@@ -23,7 +23,6 @@ class SumTree:
         size = 1
         while size < capacity:
             size <<= 1
-        self.capacity = int(capacity)
         self.size = size
         levels: list[np.ndarray] = [np.zeros(size, dtype=dtype)]
         while size > 1:

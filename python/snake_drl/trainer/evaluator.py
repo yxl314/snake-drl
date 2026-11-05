@@ -9,6 +9,7 @@ environment -- including ones that do not expose a score.
 from __future__ import annotations
 
 import statistics
+import warnings
 from collections.abc import Callable
 
 import torch
@@ -55,11 +56,11 @@ class Evaluator:
             lengths = torch.zeros(env.num_envs, dtype=torch.int64, device=self.device)
             finished_returns: list[float] = []
             finished_lengths: list[int] = []
-            steps = 0
+            steps = 0  # per environment, so a wide eval batch still finishes episodes
             while len(finished_returns) < self.episodes and steps < self.max_steps:
                 action = policy.greedy(runner.obs)
                 step = runner.step(action)
-                steps += env.num_envs
+                steps += 1
                 returns += step.reward
                 lengths += 1
                 done = step.terminated | step.truncated
@@ -71,6 +72,12 @@ class Evaluator:
                     returns[done] = 0.0
                     lengths[done] = 0
             if not finished_returns:
+                warnings.warn(
+                    f"no episode finished within {self.max_steps} steps per environment; "
+                    "increase train.eval_max_steps (or the environment's time limit)",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
                 return {"eval/episodes": 0.0, "eval/return": float("nan")}
             return {
                 "eval/episodes": float(len(finished_returns)),

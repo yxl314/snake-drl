@@ -32,7 +32,6 @@ class ActionOutput:
     action: torch.Tensor  # (B,) int64
     logprob: torch.Tensor  # (B,)
     value: torch.Tensor  # (B,)
-    entropy: torch.Tensor  # (B,)
 
 
 class GreedyPolicy(Protocol):
@@ -93,7 +92,6 @@ class ActorCriticPolicy(_PolicyBase):
             action=action,
             logprob=distribution.log_prob(action),
             value=value,
-            entropy=distribution.entropy(),
         )
 
     @torch.no_grad()

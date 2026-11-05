@@ -27,7 +27,7 @@ import numpy as np
 import torch
 
 from ._dtypes import torch_dtype
-from .envs import VectorEnv
+from .envs import StepResult, VectorEnv
 
 # The engine hands out read-only numpy views; torch only ever reads them.
 warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
@@ -102,35 +102,59 @@ class VectorRunner:
             self._pin_truncated = torch.empty(self.num_envs, dtype=torch.bool, pin_memory=True)
 
     # ------------------------------------------------------------------ util
-    def _upload(self, array: np.ndarray, dst: torch.Tensor) -> None:
-        source = torch.from_numpy(array)
-        if self._staging is not None:
-            self._staging.copy_(source)
-            dst.copy_(self._staging, non_blocking=True)
+    def _copy_into(self, array: np.ndarray, dst: torch.Tensor) -> None:
+        """Copy an environment array into a pre-allocated tensor.
+
+        On CPU this goes through numpy: a torch ``copy_`` issued right after the
+        engine's parallel section measured 2.07 ms for 76 KiB versus 0.094 ms
+        for ``np.copyto`` (torch's intra-op threads spin up again for a copy
+        that is pure memcpy).  The CUDA path keeps the pinned staging buffer.
+        """
+        if dst.device.type == "cpu":
+            # ``view[...] = array`` applies numpy's permissive assignment cast
+            # (the engine reports flags as uint8, the buffers are bool).
+            dst.numpy()[...] = array
         else:
-            dst.copy_(source)
+            dst.copy_(torch.from_numpy(array))
+
+    def _upload(self, array: np.ndarray, dst: torch.Tensor) -> None:
+        if self._staging is not None:
+            # The single pinned staging buffer is reused within the step (next
+            # frame, then final frame), so the device copy must be synchronous:
+            # a non_blocking copy could still be reading it when final_obs is
+            # written. The transfer is ~10 us for a 76 KiB frame.
+            self._staging.copy_(torch.from_numpy(array))
+            dst.copy_(self._staging)
+        else:
+            self._copy_into(array, dst)
 
     def _upload_scalar(
         self, array: np.ndarray, dst: torch.Tensor, pin: torch.Tensor | None
     ) -> None:
-        source = torch.from_numpy(array)
         if pin is not None:
-            pin.copy_(source)
-            dst.copy_(pin, non_blocking=True)
+            pin.copy_(torch.from_numpy(array))
+            dst.copy_(pin)
         else:
-            dst.copy_(source)
+            self._copy_into(array, dst)
 
-    def _successor_frame(self, result) -> torch.Tensor:
+    def _successor_frame(self, result: StepResult, done: np.ndarray) -> torch.Tensor:
         """Frame to use as the successor: final on done, next frame otherwise."""
         if result.final_obs is None:
             return self._frame_alt
         self._upload(result.final_obs, self._final)
-        done = np.logical_or(result.terminated, result.truncated)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self._done.copy_(torch.from_numpy(done))
-        self._successor.copy_(self._frame_alt)
-        self._successor[self._done] = self._final[self._done]
+        # Same reasoning as _copy_into: a handful of torch ops on small tensors
+        # right after the engine's parallel section costs milliseconds, while
+        # the numpy equivalents are microseconds.
+        if self.device.type == "cpu":
+            self._done.numpy()[...] = done
+            self._successor.numpy()[...] = self._frame_alt.numpy()
+            self._successor.numpy()[done] = self._final.numpy()[done]
+        else:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self._done.copy_(torch.from_numpy(done))
+            self._successor.copy_(self._frame_alt)
+            self._successor[self._done] = self._final[self._done]
         return self._successor
 
     # ------------------------------------------------------------------- api
@@ -158,10 +182,11 @@ class VectorRunner:
         if actions_np.shape != (self.num_envs,):
             raise ValueError(f"expected {self.num_envs} actions, got shape {actions_np.shape}")
         result = self.env.step(actions_np)
+        done = np.logical_or(result.terminated, result.truncated)
 
         obs = self.obs
         self._upload(result.obs, self._frame_alt)
-        successor = self._successor_frame(result)
+        successor = self._successor_frame(result, done)
 
         if self.frames == 1:
             next_obs = successor.unsqueeze(1)
@@ -178,6 +203,12 @@ class VectorRunner:
             # window for the caller.
             self._window_alt[:, :-1].copy_(obs[:, 1:])
             self._window_alt[:, -1].copy_(self._frame_alt)
+            if result.final_obs is not None:
+                # A reset episode starts with a clean window (every slot is the
+                # reset frame), matching reset(); carrying the previous
+                # episode's frames into the new one would feed the encoder
+                # stale history for the first `frames-1` steps.
+                self._reset_window_rows(done)
             self._window, self._window_alt = self._window_alt, self._window
 
         self._upload_scalar(result.reward, self._reward, self._pin_reward)
@@ -190,6 +221,18 @@ class VectorRunner:
             terminated=self._terminated,
             truncated=self._truncated,
         )
+
+    def _reset_window_rows(self, done: np.ndarray) -> None:
+        """Overwrite the whole window of the finished environments."""
+        if self.device.type == "cpu":
+            window = self._window_alt.numpy()
+            reset = self._frame_alt.numpy()
+            for t in range(self.frames):
+                window[done, t] = reset[done]
+        else:
+            mask = torch.from_numpy(done).to(self.device)
+            for t in range(self.frames):
+                self._window_alt[mask, t] = self._frame_alt[mask]
 
     @property
     def obs(self) -> torch.Tensor:

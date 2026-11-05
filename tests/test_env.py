@@ -91,6 +91,80 @@ def test_closed_snake_env_raises():
         env.reset()
 
 
+def test_snake_validates_its_own_fields():
+    with pytest.raises(ValueError, match="obs_mode"):
+        make_env(EnvConfig(num_envs=1, obs_mode="bitboard"))
+    with pytest.raises(ValueError, match="width/height"):
+        make_env(EnvConfig(num_envs=1, width=200))
+    with pytest.raises(ValueError, match="action_mode"):
+        make_env(EnvConfig(num_envs=1, action_mode="turning"))
+
+
 def test_unknown_environment_type_is_a_config_error():
     with pytest.raises(ValueError, match="unknown environment type"):
         make_env(EnvConfig(type="nope", num_envs=1))
+
+
+def test_evaluation_budget_is_per_environment():
+    """A wide eval batch must still finish long episodes with the default budget."""
+    import torch
+    import torch.nn as nn
+    from snake_drl.device import resolve_device
+    from snake_drl.envs.base import StepResult, VectorEnv
+    from snake_drl.spaces import ActionSpec, ObsSpec
+    from snake_drl.trainer.evaluator import Evaluator
+
+    class LongEpisodes(VectorEnv):
+        """Every episode lasts ``horizon`` steps; nobody dies early."""
+
+        def __init__(self, num_envs: int = 8, horizon: int = 400) -> None:
+            self.num_envs = num_envs
+            self.horizon = horizon
+            self.obs_spec = ObsSpec((2,), kind="vector", dtype="float32")
+            self.action_spec = ActionSpec(2)
+            self._t = np.zeros(num_envs, dtype=np.int64)
+
+        def reset(self):
+            self._t[:] = 0
+            return np.zeros((self.num_envs, 2), dtype=np.float32)
+
+        def step(self, actions):
+            self._t += 1
+            done = self._t >= self.horizon
+            obs = np.zeros((self.num_envs, 2), dtype=np.float32)
+            truncated = done.copy()
+            self._t[done] = 0
+            return StepResult(
+                obs,
+                np.zeros(self.num_envs, dtype=np.float32),
+                np.zeros(self.num_envs, dtype=bool),
+                truncated,
+                obs.copy(),
+            )
+
+    class Policy(nn.Module):
+        frames = 1
+
+        def greedy(self, obs):
+            return torch.zeros(obs.shape[0], dtype=torch.long)
+
+    device = resolve_device("cpu")
+    evaluator = Evaluator(lambda: LongEpisodes(), device, episodes=4, max_steps=500)
+    metrics = evaluator.run(Policy())
+    # The whole vectorized batch finishes at once, so the count overshoots.
+    assert metrics["eval/episodes"] >= 4
+    assert metrics["eval/length"] == 400
+
+    starved = Evaluator(lambda: LongEpisodes(), device, episodes=4, max_steps=50)
+    with pytest.warns(RuntimeWarning, match="no episode finished"):
+        metrics = starved.run(Policy())
+    assert metrics["eval/episodes"] == 0
+
+
+def test_toy_env_rejects_use_after_close():
+    env = make_env(EnvConfig(type="corridor", num_envs=2, seed=0))
+    env.reset()
+    env.close()
+    env.close()  # idempotent
+    with pytest.raises(RuntimeError, match="closed"):
+        env.reset()

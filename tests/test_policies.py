@@ -65,3 +65,17 @@ def test_observation_scale_is_applied_without_mutating_input():
     feats = policy.prepare(obs)
     assert torch.allclose(feats, torch.ones_like(feats))
     assert torch.equal(obs, before)
+
+
+def test_head_must_agree_with_the_algorithm():
+    dueling_cfg = NetworkConfig(head="dueling_q")
+    with pytest.raises(ValueError, match="dueling algorithm"):
+        build_policy(dueling_cfg, IMAGE, ACTIONS, family="q", dueling=False)
+
+    plain_cfg = NetworkConfig(head="q")
+    with pytest.raises(ValueError, match="contradicts a dueling"):
+        build_policy(plain_cfg, IMAGE, ACTIONS, family="q", dueling=True)
+
+    # the matching combinations still build
+    build_policy(NetworkConfig(head="dueling_q"), IMAGE, ACTIONS, family="q", dueling=True)
+    build_policy(NetworkConfig(head="q"), IMAGE, ACTIONS, family="q", dueling=False)

@@ -44,6 +44,7 @@ def make_config(**overrides):
             "learning_starts": 16,
             "lr": 1e-3,
             "eps_decay_steps": 100,
+            "target_update": 32,
         },
     }
     for key, value in overrides.items():

@@ -7,6 +7,7 @@ appendable; TensorBoard is imported lazily so it remains an optional dependency.
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -38,18 +39,26 @@ class MetricLogger:
         self._last = time.time()
 
     def log(self, step: int, metrics: dict[str, float]) -> None:
-        record = {"step": int(step), **{k: float(v) for k, v in metrics.items()}}
+        record: dict[str, float | int | None] = {"step": int(step)}
+        for key, value in metrics.items():
+            number = float(value)
+            # JSON has no NaN/Infinity; keep the line parseable by strict readers.
+            record[key] = number if math.isfinite(number) else None
         self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._file.flush()
         if self._tb is not None:
-            for key, value in record.items():
-                if key != "step":
-                    self._tb.add_scalar(key, value, step)
+            for key, metric in record.items():
+                if key != "step" and metric is not None:
+                    self._tb.add_scalar(key, float(metric), step)
         if self._console:
             now = time.time()
             elapsed = now - self._last
             self._last = now
-            body = "  ".join(f"{k}={v:.4g}" for k, v in record.items() if k != "step")
+            body = "  ".join(
+                f"{key}={metric:.4g}" if isinstance(metric, float) else f"{key}=n/a"
+                for key, metric in record.items()
+                if key != "step"
+            )
             print(f"[{step:>9d}] {body}  ({elapsed:.1f}s)", flush=True)
 
     def close(self) -> None:

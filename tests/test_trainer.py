@@ -61,7 +61,10 @@ def test_checkpoint_roundtrip_and_resume(tmp_path):
 
     # resuming restores the policy weights and the counters
     resumed = build_algorithm(loaded_cfg, configure_runtime(DEVICE, 4))
-    resumed.load_state_dict(payload["algorithm"])
+    # Resuming restores weights/counters but not the replay buffer; that is
+    # reported, not silently ignored.
+    with pytest.warns(RuntimeWarning, match="no replay buffer"):
+        resumed.load_state_dict(payload["algorithm"])
     assert resumed.env_steps == 512
     for a, b in zip(policy.parameters(), resumed.policy.parameters(), strict=True):
         assert torch.equal(a, b)
@@ -120,3 +123,25 @@ def test_eval_overrides_are_applied_on_top_of_the_checkpoint(tmp_path):
     assert loaded_cfg.env.num_envs == 2
     assert loaded_cfg.network.encoder.type == cfg.network.encoder.type
     assert payload["iterations"] == trainer.iteration
+
+
+def test_concurrent_runs_do_not_share_a_directory(tmp_path):
+    cfg = _config(tmp_path, **{"train.total_steps": 64, "train.eval_every": 10**9})
+    first, first_dir = build_trainer(cfg)
+    second, second_dir = build_trainer(cfg)
+    assert first_dir != second_dir
+    first.algorithm.close()
+    second.algorithm.close()
+
+
+def test_eval_rejects_structural_overrides_with_a_clear_error(tmp_path):
+    cfg = _config(tmp_path, **{"train.eval_every": 10**9})
+    trainer, run_dir = build_trainer(cfg)
+    trainer.run()
+
+    with pytest.raises(ValueError, match="structural options"):
+        load_policy(
+            run_dir / "latest.pt",
+            "cpu",
+            overrides=["network.encoder.hidden_dims=[8]"],
+        )

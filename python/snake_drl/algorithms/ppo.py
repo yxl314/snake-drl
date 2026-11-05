@@ -87,7 +87,8 @@ class PPO(Algorithm):
         adv = advantages.reshape(-1)
         ret = returns.reshape(-1)
         if self.cfg.normalize_advantage:
-            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+            # unbiased=False: a one-transition rollout has std 0, not NaN.
+            adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
         lr = self._current_lr()
         for group in self.optimizer.param_groups:
@@ -120,6 +121,7 @@ class PPO(Algorithm):
                 buf.values,
                 next_values,
                 buf.terminated,
+                buf.truncated,
                 self.cfg.gamma,
                 self.cfg.gae_lambda,
             )

@@ -22,8 +22,6 @@ def save_checkpoint(
     path: str | Path,
     algorithm: Algorithm,
     config: ProjectConfig,
-    *,
-    extra: dict[str, Any] | None = None,
 ) -> Path:
     """Write a self-describing checkpoint and return its path."""
     path = Path(path)
@@ -35,7 +33,6 @@ def save_checkpoint(
             "env_steps": algorithm.env_steps,
             "updates": algorithm.updates,
             "iterations": algorithm.iterations,
-            "extra": extra or {},
         },
         path,
     )

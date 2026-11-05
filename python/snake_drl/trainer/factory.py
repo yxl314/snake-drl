@@ -48,7 +48,7 @@ def _build_policy(
     cfg: ProjectConfig, obs_spec: ObsSpec, action_spec: ActionSpec, device: torch.device
 ) -> ActorCriticPolicy | QPolicy:
     dueling = bool(getattr(cfg.algorithm, "is_dueling", False))
-    policy = build_policy(
+    return build_policy(
         cfg.network,
         obs_spec,
         action_spec,
@@ -56,8 +56,6 @@ def _build_policy(
         device=device,
         dueling=dueling,
     )
-    assert isinstance(policy, (ActorCriticPolicy, QPolicy))
-    return policy
 
 
 def _replay_device(cfg: ProjectConfig, compute: torch.device) -> torch.device:
@@ -151,6 +149,22 @@ def build_evaluator(cfg: ProjectConfig, device: torch.device) -> Evaluator:
     )
 
 
+def _unique_run_dir(root: Path, name: str) -> Path:
+    """``<root>/<name>-<timestamp>[-n]``; a sweep may start twice in one second.
+
+    ``mkdir(exist_ok=False)`` makes the check race-free across processes.
+    """
+    base = f"{name}-{time.strftime('%Y%m%d-%H%M%S')}"
+    suffix = 1
+    while True:
+        run_dir = root / (base if suffix == 1 else f"{base}-{suffix}")
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        except FileExistsError:
+            suffix += 1
+
+
 def _write_config(run_dir: Path, cfg: ProjectConfig) -> None:
     (run_dir / "config.yaml").write_text(
         OmegaConf.to_yaml(OmegaConf.create(to_dict(cfg))), encoding="utf-8"
@@ -165,8 +179,7 @@ def build_trainer(
     runtime = configure_runtime(compute, cfg.run.torch_threads)
     algorithm = build_algorithm(cfg, runtime)
 
-    run_dir = Path(cfg.run.output_dir) / f"{cfg.run.name}-{time.strftime('%Y%m%d-%H%M%S')}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir = _unique_run_dir(Path(cfg.run.output_dir), cfg.run.name)
     _write_config(run_dir, cfg)
 
     logger = MetricLogger(run_dir)
@@ -204,6 +217,14 @@ def load_policy(
         policy = _build_policy(cfg, env.obs_spec, env.action_spec, device)
     finally:
         env.close()
-    policy.load_state_dict(payload["algorithm"]["policy"])
+    try:
+        policy.load_state_dict(payload["algorithm"]["policy"])
+    except RuntimeError as exc:
+        applied = ", ".join(overrides or []) or "<none>"
+        raise ValueError(
+            "the checkpoint weights do not fit the config after applying overrides "
+            f"[{applied}]; structural options (network.*, env.width/height) cannot be "
+            "changed for evaluation"
+        ) from exc
     policy.eval()
     return policy, cfg, payload

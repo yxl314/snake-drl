@@ -18,6 +18,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any
 
 import dacite
+from dacite.exceptions import UnexpectedDataError
 from omegaconf import OmegaConf
 
 __all__ = [
@@ -39,6 +40,25 @@ __all__ = [
 
 # Values OmegaConf may hand back as strings; dacite coerces them.
 _CASTS = [int, float, str]
+
+
+def _to_bool(value: Any) -> bool:
+    """Parse booleans strictly: ``bool("false")`` is ``True``, which is a trap."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes", "on"):
+            return True
+        if text in ("false", "0", "no", "off"):
+            return False
+        raise ValueError(f"cannot interpret {value!r} as a boolean")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raise TypeError(f"cannot interpret {value!r} as a boolean")
+
+
+_DACITE = dacite.Config(strict=True, cast=_CASTS, type_hooks={bool: _to_bool})
 
 
 # --------------------------------------------------------------------------- #
@@ -73,19 +93,11 @@ class EnvConfig:
     kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.action_mode not in ("relative", "absolute"):
-            raise ValueError(
-                f"env.action_mode must be 'relative' or 'absolute', got {self.action_mode!r}"
-            )
-        if self.obs_mode != "grid":
-            raise ValueError(
-                f"env.obs_mode={self.obs_mode!r} is not supported by the training adapter; "
-                "only 'grid' is (bitboard->grid unpacking measured ~11x the copy it saves)"
-            )
+        # Only generic invariants live here; board size, action mode and
+        # observation mode are snake-specific and checked by SnakeVecEnv, so a
+        # custom environment can use the same config class.
         if self.num_envs < 1:
             raise ValueError("env.num_envs must be >= 1")
-        if not (3 <= self.width <= 64 and 3 <= self.height <= 64):
-            raise ValueError("env.width/height must be within 3..64")
 
 
 # --------------------------------------------------------------------------- #
@@ -129,13 +141,11 @@ class EncoderConfig:
     tf_ff: int = 256
 
     _TEMPORAL = ("gru", "transformer", "convgru", "convtransformer")
-    _ALL = ("mlp", "cnn", "gru", "transformer", "convgru", "convtransformer")
 
     def __post_init__(self) -> None:
-        if self.type not in self._ALL:
-            raise ValueError(
-                f"network.encoder.type must be one of {'/'.join(self._ALL)}, got {self.type!r}"
-            )
+        # The registry (snake_drl.nn.encoders.ENCODERS) is the single source of
+        # truth for which names exist: a user-registered encoder must be usable
+        # from YAML, so no hardcoded whitelist here.
         if self.frames < 1:
             raise ValueError("network.encoder.frames must be >= 1")
         if self.type in self._TEMPORAL and self.frames < 2:
@@ -180,8 +190,6 @@ class BufferConfig:
     device: str = "auto"  # "auto" | "cpu" | "cuda"
 
     def __post_init__(self) -> None:
-        if self.type not in ("uniform", "prioritized"):
-            raise ValueError(f"buffer.type must be 'uniform' or 'prioritized', got {self.type!r}")
         if self.capacity < 1:
             raise ValueError("buffer.capacity must be >= 1")
         if self.alpha < 0.0:
@@ -215,8 +223,8 @@ class PPOConfig:
     adam_eps: float = 1e-5
 
     def __post_init__(self) -> None:
-        if self.n_steps < 1 or self.epochs < 0 or self.minibatch_size < 1:
-            raise ValueError("ppo: n_steps and minibatch_size must be >= 1, epochs >= 0")
+        if self.n_steps < 1 or self.minibatch_size < 1 or self.epochs < 1:
+            raise ValueError("ppo: n_steps, minibatch_size and epochs must be >= 1")
         if self.lr_schedule not in ("constant", "linear"):
             raise ValueError(
                 f"ppo.lr_schedule must be 'constant' or 'linear', got {self.lr_schedule!r}"
@@ -299,6 +307,8 @@ class TrainConfig:
     log_every: int = 2_000
     eval_every: int = 50_000
     eval_episodes: int = 20
+    # Budget per evaluation environment, not in total across the batch, so a
+    # long episode can still finish when the evaluation batch is wide.
     eval_max_steps: int = 5_000
     save_every: int = 200_000
     keep_last: int = 3
@@ -321,12 +331,41 @@ class ProjectConfig:
     train: TrainConfig = field(default_factory=TrainConfig)
 
     def __post_init__(self) -> None:
+        # ``algorithm`` is still the default here when built by ``from_dict``
+        # (the block is parsed separately and assigned afterwards), so the
+        # cross-field checks run in ``from_dict`` via validate().
         if not is_dataclass(self.algorithm):
             raise TypeError("algorithm must be a PPOConfig or DQNConfig")
+
+    def validate(self) -> None:
+        """Cross-field checks; ``from_dict``/``load`` call this after the
+        algorithm block has been parsed and assigned."""
         if isinstance(self.algorithm, PPOConfig) and self.algorithm.type != "ppo":
             raise ValueError("PPOConfig.type must be 'ppo'")
         if isinstance(self.algorithm, DQNConfig) and self.algorithm.type == "ppo":
             raise ValueError("DQNConfig.type must be dqn/ddqn/d3qn")
+        if isinstance(self.algorithm, PPOConfig) and self.network.encoder.dropout > 0.0:
+            # PPO's ratio compares action probabilities from two forwards. With
+            # dropout those come from different sub-networks, so the ratio is
+            # not the importance ratio it claims to be.
+            raise ValueError(
+                "PPO requires a deterministic forward: set network.encoder.dropout: 0 "
+                "(dropout is supported by the DQN family)"
+            )
+        if isinstance(self.algorithm, DQNConfig):
+            threshold = max(self.algorithm.learning_starts, self.algorithm.batch_size)
+            if self.buffer.capacity < threshold:
+                raise ValueError(
+                    f"buffer.capacity ({self.buffer.capacity}) is below "
+                    f"max(learning_starts, batch_size) = {threshold}: the DQN readiness "
+                    "gate would never open and no gradient step would be taken"
+                )
+            if self.algorithm.tau >= 1.0 and self.algorithm.target_update >= self.train.total_steps:
+                raise ValueError(
+                    f"algorithm.target_update ({self.algorithm.target_update}) must be "
+                    f"smaller than train.total_steps ({self.train.total_steps}), otherwise "
+                    "the target network is never synchronised"
+                )
 
     @property
     def policy_family(self) -> str:
@@ -342,13 +381,18 @@ class ProjectConfig:
 # loading
 # --------------------------------------------------------------------------- #
 def _algorithm_from_dict(raw: dict[str, Any]) -> PPOConfig | DQNConfig:
+    if not isinstance(raw, dict):
+        raise TypeError(
+            f"the algorithm block must be a mapping, got {type(raw).__name__} "
+            "(an empty YAML block is None)"
+        )
     kind = str(raw.get("type", "dqn")).lower()
     try:
         config_cls = ALGORITHM_CONFIGS[kind]
     except KeyError:
         available = ", ".join(sorted(ALGORITHM_CONFIGS))
         raise ValueError(f"unknown algorithm type {kind!r}; available: {available}") from None
-    return dacite.from_dict(config_cls, raw, config=dacite.Config(strict=True, cast=_CASTS))
+    return dacite.from_dict(config_cls, raw, config=_DACITE)
 
 
 def from_dict(raw: dict[str, Any]) -> ProjectConfig:
@@ -357,8 +401,15 @@ def from_dict(raw: dict[str, Any]) -> ProjectConfig:
         raise TypeError(f"config root must be a mapping, got {type(raw).__name__}")
     data = dict(raw)
     algorithm = _algorithm_from_dict(data.pop("algorithm", {}))
-    cfg = dacite.from_dict(ProjectConfig, data, config=dacite.Config(strict=True, cast=_CASTS))
+    try:
+        cfg = dacite.from_dict(ProjectConfig, data, config=_DACITE)
+    except UnexpectedDataError as exc:
+        keys = ", ".join(sorted(exc.keys))
+        raise ValueError(
+            f"unknown config key(s): {keys} -- check the spelling (or the --set argument)"
+        ) from None
     cfg.algorithm = algorithm
+    cfg.validate()  # the algorithm block was parsed after __post_init__
     return cfg
 
 
@@ -366,6 +417,9 @@ def apply_overrides(raw: dict[str, Any], overrides: list[str]) -> dict[str, Any]
     """Apply ``key.path=value`` overrides to a raw config dictionary."""
     if not overrides:
         return raw
+    for item in overrides:
+        if "=" not in item:
+            raise ValueError(f"override {item!r} must have the form KEY=VALUE")
     merged = OmegaConf.merge(OmegaConf.create(raw), OmegaConf.from_dotlist(list(overrides)))
     return OmegaConf.to_container(merged, resolve=True)  # type: ignore[return-value]
 

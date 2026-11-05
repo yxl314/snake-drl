@@ -21,6 +21,7 @@ false, including truncated steps, using the final observation stored as
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import torch
@@ -133,7 +134,7 @@ class DQN(Algorithm):
             values = stats.tolist()
             metrics.update(dict(zip(_STAT_KEYS, values, strict=True)))
         metrics["updates"] = float(updates)
-        self._maybe_sync_target()
+        self._maybe_hard_sync()
         return metrics
 
     def _credit_updates(self, num_envs: int) -> int:
@@ -153,7 +154,7 @@ class DQN(Algorithm):
         """One gradient step; returns ``[loss, q_mean, target_mean, |td|]``."""
         cfg = self.cfg
         batch = self.replay.sample(cfg.batch_size, self.beta(self.env_steps))
-        batch = batch.to(self.device, non_blocking=True)
+        batch = batch.to(self.device)
         q = self.policy(batch.obs).gather(1, batch.action.unsqueeze(1)).squeeze(1)
 
         with torch.no_grad():
@@ -172,17 +173,23 @@ class DQN(Algorithm):
         optimizer_step(self.optimizer, self._parameters, loss, max_grad_norm=cfg.max_grad_norm)
         self.replay.update_priorities(batch.indices, td_error.detach())
         self.updates += 1
+        if cfg.tau < 1.0:
+            # Polyak averaging belongs to the gradient step, not to the collect
+            # cycle: with train_freq=4 that would average 4x less often.
+            self._polyak_update(cfg.tau)
         return torch.stack((loss.detach(), q.mean(), target.mean(), td_error.abs().mean()))
 
-    def _maybe_sync_target(self) -> None:
+    def _polyak_update(self, tau: float) -> None:
+        with torch.no_grad():
+            for target, online in zip(
+                self.target_policy.parameters(), self.policy.parameters(), strict=True
+            ):
+                target.mul_(1.0 - tau).add_(online, alpha=tau)
+
+    def _maybe_hard_sync(self) -> None:
         cfg = self.cfg
         if cfg.tau < 1.0:
-            with torch.no_grad():
-                for target, online in zip(
-                    self.target_policy.parameters(), self.policy.parameters(), strict=True
-                ):
-                    target.mul_(1.0 - cfg.tau).add_(online, alpha=cfg.tau)
-            return
+            return  # soft updates happen after every gradient step
         if self.env_steps >= self._next_target:
             self.target_policy.load_state_dict(self.policy.state_dict())
             self._next_target = self.env_steps + cfg.target_update
@@ -193,6 +200,7 @@ class DQN(Algorithm):
         state["target_policy"] = self.target_policy.state_dict()
         state["optimizer"] = self.optimizer.state_dict()
         state["next_target"] = self._next_target
+        state["credit"] = self._credit
         return state
 
     def load_state_dict(self, state: dict[str, Any]) -> None:
@@ -201,3 +209,13 @@ class DQN(Algorithm):
         if "optimizer" in state:
             self.optimizer.load_state_dict(state["optimizer"])
         self._next_target = int(state.get("next_target") or self.cfg.target_update)
+        self._credit = int(state.get("credit", 0))
+        if self.env_steps > 0 and len(self.replay) == 0:
+            warnings.warn(
+                "checkpoint carries no replay buffer: training resumes with an empty "
+                "replay and no gradient steps until "
+                f"{max(self.cfg.learning_starts, self.cfg.batch_size)} new transitions "
+                "have been collected",
+                RuntimeWarning,
+                stacklevel=2,
+            )

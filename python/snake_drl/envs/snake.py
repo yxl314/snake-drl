@@ -28,6 +28,17 @@ class SnakeVecEnv(VectorEnv):
     """Batched snake games driven with the engine's ``SameStep`` autoreset."""
 
     def __init__(self, cfg: EnvConfig, seed: int | None = None) -> None:
+        if cfg.obs_mode != "grid":
+            raise ValueError(
+                f"snake obs_mode={cfg.obs_mode!r} is not supported by the training adapter; "
+                "only 'grid' is (bitboard->grid unpacking measured ~11x the copy it saves)"
+            )
+        if cfg.action_mode not in ("relative", "absolute"):
+            raise ValueError(
+                f"snake action_mode must be 'relative' or 'absolute', got {cfg.action_mode!r}"
+            )
+        if not (3 <= cfg.width <= 64 and 3 <= cfg.height <= 64):
+            raise ValueError("snake width/height must be within 3..64")
         vec = VecConfig()
         vec.num_envs = cfg.num_envs
         vec.width = cfg.width

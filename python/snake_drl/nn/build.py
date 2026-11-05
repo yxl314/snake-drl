@@ -38,17 +38,19 @@ def build_policy(
     family: str,
     device: torch.device | str = "cpu",
     dueling: bool = False,
-) -> nn.Module:
+) -> ActorCriticPolicy | QPolicy:
     """Build the policy for ``family`` ("actor_critic" for PPO, "q" for DQN)."""
     if family not in _FAMILIES:
         raise ValueError(f"policy family must be one of {_FAMILIES}, got {family!r}")
-    _check_head(cfg.head, family)
+    _check_head(cfg.head, family, dueling)
 
     encoder = build_encoder(obs_spec, cfg.encoder)
     head: Head
     if family == "actor_critic":
         head = ActorCriticHead(encoder.feature_dim, action_spec.n)
-        policy: nn.Module = ActorCriticPolicy(encoder, head, obs_spec, action_spec)
+        policy: ActorCriticPolicy | QPolicy = ActorCriticPolicy(
+            encoder, head, obs_spec, action_spec
+        )
     else:
         head = (
             DuelingQHead(encoder.feature_dim, action_spec.n)
@@ -64,11 +66,21 @@ def build_policy(
     return policy.to(torch.device(device))
 
 
-def _check_head(head: str, family: str) -> None:
+def _check_head(head: str, family: str, dueling: bool) -> None:
+    """Reject a head that disagrees with the algorithm instead of ignoring it."""
     if head == "actor_critic" and family != "actor_critic":
         raise ValueError("network.head=actor_critic is only valid for PPO")
     if head in ("q", "dueling_q") and family != "q":
         raise ValueError(f"network.head={head} is only valid for the DQN family")
+    if head == "dueling_q" and not dueling:
+        raise ValueError(
+            "network.head=dueling_q needs a dueling algorithm: set algorithm.type=d3qn "
+            "or algorithm.dueling=true"
+        )
+    if head == "q" and dueling:
+        raise ValueError(
+            "network.head=q contradicts a dueling algorithm; use head=auto (or dueling_q)"
+        )
 
 
 def count_parameters(module: nn.Module) -> int:

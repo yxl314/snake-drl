@@ -34,9 +34,14 @@ class _NumpyEnv(VectorEnv):
         self._rng = np.random.default_rng(seed)
         self._terminated = np.zeros(self.num_envs, dtype=bool)
         self._truncated = np.zeros(self.num_envs, dtype=bool)
+        self._closed = False
 
     def close(self) -> None:
-        pass
+        self._closed = True
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeError(f"this {type(self).__name__} has been closed")
 
 
 class BanditEnv(_NumpyEnv):
@@ -60,10 +65,12 @@ class BanditEnv(_NumpyEnv):
         return out
 
     def reset(self) -> np.ndarray:
+        self._require_open()
         self._ctx = self._rng.integers(0, self.n_ctx, self.num_envs)
         return self._obs(self._ctx)
 
     def step(self, actions: np.ndarray) -> StepResult:
+        self._require_open()
         ctx = self._ctx
         reward = (np.asarray(actions) == ctx).astype(np.float32)
         final = self._obs(ctx)
@@ -104,11 +111,13 @@ class CorridorEnv(_NumpyEnv):
         return out
 
     def reset(self) -> np.ndarray:
+        self._require_open()
         self._pos[:] = 0
         self._steps[:] = 0
         return self._obs()
 
     def step(self, actions: np.ndarray) -> StepResult:
+        self._require_open()
         actions = np.asarray(actions)
         obs_before = self._obs()
         walking_off = (actions == 0) & (self._pos == 0)

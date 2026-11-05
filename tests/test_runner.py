@@ -32,8 +32,11 @@ def test_runner_window_and_terminal_semantics():
         # ...while the environment window already belongs to the new episode
         assert not torch.equal(runner.obs[0, -1], final)
         if frames > 1:
+            # the transition's successor still carries the episode history...
             assert torch.equal(step.next_obs[0, :-1], step.obs[0, 1:])
-            assert torch.equal(runner.obs[0, :-1], step.obs[0, 1:])
+            # ...but the new episode starts with a clean window
+            for t in range(frames):
+                assert torch.equal(runner.obs[0, t], runner.obs[0, -1])
         runner.close()
 
 
