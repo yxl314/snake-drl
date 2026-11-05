@@ -33,6 +33,9 @@
 5. **截断 bootstrap**：早期实现把 `done`（terminated∨truncated）当作终止掩码，
    截断时不再 bootstrap，Q 有系统性低估。修复：缓冲区存 `terminated` 与
    `truncated` 两列，`next_obs` 在终止/截断步统一取引擎的 `final_*`。
+6. **PPO 每次 rollout 都 reset 环境**：episode 被硬切成 `n_steps`，智能体无法跨
+   rollout 维持一局。修复：runner 的状态跨 iterate 保留（与 DQN 一致）。
+   修复后 300k 步的评估回报由 ±0.25 的平台变为 0.31→0.44→0.63→0.65→0.80 单调上升。
 
 ### 0.3 被实验确认的 v1 决策
 
@@ -185,7 +188,8 @@ algo    = PPO(cfg.algorithm, policy, runner, buffer, optimizer, device)
 | `convgru` | conv stem → 二维隐状态 ConvGRU 扫描 T 帧 → mean pool | image | 真正的卷积门控（r/z/n 分 x、h 两路） |
 | `convtransformer` | conv patch embedding → (帧×patch) token + 帧/位置编码 → Transformer | image | 时空注意力 |
 
-测量（B=256、T=4、3×16×16、4 线程；v1 原型实现，机器负载中等，绝对值仅供比例参考）：
+测量（B=256、T=4、3×16×16、4 线程；v1 原型实现，机器负载中等，绝对值仅供比例参考。
+实现期的 `FastLinear` 主要改善线性层，编码器的相对排序不变）：
 
 | 编码器 | fwd (ms) | 单步训练 (ms) | 参数量 |
 |---|---:|---:|---:|
@@ -364,8 +368,8 @@ PER：采样 256 条 67 µs、更新 256 个优先级 40 µs，相对一次 DQN 
 
 - rollout：`2 · S · N · T · frame_bytes`（obs + next_obs）。
 - replay：`2 · capacity · T · frame_bytes`。
-- 例：16×16、3 通道、T=1、S=128、N=256 → rollout ≈ 50 MiB；
-  capacity=100k 的回放 ≈ 300 MiB（uint8）。
+- 例：16×16、3 通道、T=1、S=128、N=256 → rollout ≈ 48 MiB；
+  capacity=100k 的回放 ≈ 146 MiB（uint8，obs+next_obs）。
 
 ---
 
@@ -425,3 +429,45 @@ snake-play
    但未在本机做 GPU 基准；`snake-drl bench` 可在目标机器上复测。
 6. snake 的观测是 body/head/food 三个平面，朝向可由蛇头与相邻身体格推断；
    若需要显式方向通道，可通过环境包装器扩展（不影响算法层）。
+
+
+---
+
+## 16. 端到端验证（E7）
+
+任务：8×8 棋盘、256 并行环境、每局最多 300 步、CPU、MLP 编码器。
+这不是调参基准，只用于验证"引擎 → 采集 → 回放 → 更新 → 评估 → checkpoint"
+整条链路能真正学起来。随机策略基线：**回报 -0.06、存活 2 步**（撞墙即死）。
+
+| 算法 | 步数 | 评估回报（20 局） | 单局最大回报 | 平均存活 |
+|---|---:|---:|---:|---:|
+| 随机策略 | — | -0.06 | — | 2 |
+| D3QN + MLP | 25k | 0.72 | 1 | 229 |
+| D3QN + MLP | 50k | 1.16 | 3 | 129 |
+| D3QN + MLP | 75k | 2.61 | 7 | 144 |
+| D3QN + MLP | 100k | 1.84 | 5 | 201 |
+| D3QN + MLP（CLI eval 复测） | 100k | 2.16 | 6 | 203 |
+| PPO + MLP | 65k | 0.31 | 1 | 300 |
+| PPO + MLP | 130k | 0.44 | 1 | 268 |
+| PPO + MLP | 200k | 0.63 | 1 | 226 |
+| PPO + MLP | 260k | 0.65 | 1 | 201 |
+| PPO + MLP | 300k | 0.80 | 1 | 187 |
+
+结论：
+
+- 离线算法（D3QN + PER）在 10 万步内明显优于 PPO，符合稀疏奖励、长回合任务的
+  样本效率预期；PPO 需要更多样本或奖励塑形。
+- 两者都显著高于随机基线，且 D3QN 的"存活 + 进食"行为出现得很早。
+- 100k 步的 checkpoint 用 `snake-drl eval` 复测得到 2.16，与训练期评估一致，
+  说明评估路径与训练路径使用同一套观测/动作语义。
+
+复现：
+
+```bash
+snake-drl train -c configs/dqn_mlp.yaml --set algorithm.type=d3qn \
+  --set algorithm.lr=3e-4 --set algorithm.train_freq=4 \
+  --set algorithm.eps_decay_steps=60000 --set env.width=8 --set env.height=8 \
+  --set train.total_steps=100000
+
+snake-drl eval -m runs/<run>/latest.pt --episodes 20
+```
