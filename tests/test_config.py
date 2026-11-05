@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from snake_drl.config import DQNConfig, PPOConfig, from_dict, load, to_dict
 
 
@@ -63,3 +62,27 @@ def test_roundtrip_dict():
     again = from_dict(to_dict(cfg))
     assert again.env.num_envs == 3
     assert isinstance(again.algorithm, DQNConfig)
+
+
+def test_policy_family_follows_the_algorithm():
+    assert from_dict({"algorithm": {"type": "ppo"}}).policy_family == "actor_critic"
+    assert from_dict({"algorithm": {"type": "d3qn"}}).policy_family == "q"
+    assert from_dict({"algorithm": {"type": "ppo"}}).is_on_policy is True
+
+
+def test_apply_overrides_precedence():
+    from snake_drl.config import apply_overrides
+
+    raw = {"algorithm": {"type": "ppo", "lr": 0.001}, "env": {"num_envs": 4}}
+    merged = apply_overrides(raw, ["algorithm.type=d3qn", "env.num_envs=8"])
+    assert merged["algorithm"]["type"] == "d3qn"
+    assert merged["algorithm"]["lr"] == 0.001  # untouched keys survive
+    assert merged["env"]["num_envs"] == 8
+    assert apply_overrides(raw, []) is raw
+
+
+def test_removed_knobs_are_rejected():
+    # ``grad_clip`` was folded into ``max_grad_norm == 0``; strict parsing keeps
+    # old configs from silently half-applying.
+    with pytest.raises(Exception, match="grad_clip"):
+        from_dict({"algorithm": {"type": "dqn", "grad_clip": True}})

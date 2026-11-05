@@ -4,7 +4,6 @@ import json
 
 import pytest
 import torch
-
 from snake_drl.config import from_dict
 from snake_drl.device import configure_runtime, resolve_device
 from snake_drl.trainer.factory import build_algorithm, build_trainer, load_policy
@@ -64,7 +63,7 @@ def test_checkpoint_roundtrip_and_resume(tmp_path):
     resumed = build_algorithm(loaded_cfg, configure_runtime(DEVICE, 4))
     resumed.load_state_dict(payload["algorithm"])
     assert resumed.env_steps == 512
-    for a, b in zip(policy.parameters(), resumed.policy.parameters()):
+    for a, b in zip(policy.parameters(), resumed.policy.parameters(), strict=True):
         assert torch.equal(a, b)
     resumed.close()
 
@@ -89,3 +88,35 @@ def test_trainer_respects_total_steps():
 def test_invalid_total_steps():
     with pytest.raises(ValueError):
         Trainer(algorithm=None, total_steps=0)  # type: ignore[arg-type]
+
+
+def test_total_steps_mismatch_is_rejected():
+    cfg = from_dict(
+        {
+            "run": {"device": "cpu"},
+            "env": {"type": "bandit", "num_envs": 4},
+            "network": {"encoder": {"type": "mlp", "hidden_dims": [16], "feature_dim": 16}},
+            "train": {"total_steps": 64, "progress": False},
+            "algorithm": {"type": "ppo", "n_steps": 8, "minibatch_size": 16, "epochs": 1},
+        }
+    )
+    algorithm = build_algorithm(cfg, configure_runtime(DEVICE, 4))
+    with pytest.raises(ValueError, match="same config"):
+        Trainer(algorithm, total_steps=128)
+    algorithm.close()
+
+
+def test_eval_overrides_are_applied_on_top_of_the_checkpoint(tmp_path):
+    cfg = _config(tmp_path, **{"train.eval_every": 10**9})
+    trainer, run_dir = build_trainer(cfg)
+    trainer.run()
+
+    _, loaded_cfg, payload = load_policy(
+        run_dir / "latest.pt",
+        "cpu",
+        overrides=["train.eval_episodes=3", "env.num_envs=2"],
+    )
+    assert loaded_cfg.train.eval_episodes == 3
+    assert loaded_cfg.env.num_envs == 2
+    assert loaded_cfg.network.encoder.type == cfg.network.encoder.type
+    assert payload["iterations"] == trainer.iteration

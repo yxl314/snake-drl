@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import torch
-
 from snake_drl.config import EnvConfig
 from snake_drl.envs import make_env
 from snake_drl.runner import VectorRunner
@@ -27,7 +26,7 @@ def test_runner_window_and_terminal_semantics():
         assert obs.dtype == torch.uint8
 
         _, step = _straight_until_done(runner)
-        final = torch.from_numpy(env._env.final_observations()[0].copy())
+        final = torch.from_numpy(env._engine.final_observations()[0].copy())
         # the successor reported to the learner is the terminal frame...
         assert torch.equal(step.next_obs[0, -1], final)
         # ...while the environment window already belongs to the new episode

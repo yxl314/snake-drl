@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 import torch
-
 from snake_drl.config import EncoderConfig
 from snake_drl.nn import ENCODERS, build_encoder
 from snake_drl.spaces import ObsSpec

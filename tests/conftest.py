@@ -38,8 +38,13 @@ def make_config(**overrides):
         },
         "network": {"encoder": {"type": "mlp", "hidden_dims": [32], "feature_dim": 32}},
         "train": {"total_steps": 64, "eval_episodes": 4, "eval_every": 10_000},
-        "algorithm": {"type": "dqn", "batch_size": 32, "learning_starts": 16, "lr": 1e-3,
-                      "eps_decay_steps": 100},
+        "algorithm": {
+            "type": "dqn",
+            "batch_size": 32,
+            "learning_starts": 16,
+            "lr": 1e-3,
+            "eps_decay_steps": 100,
+        },
     }
     for key, value in overrides.items():
         node = raw

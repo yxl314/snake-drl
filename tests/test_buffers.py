@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-
 from snake_drl.buffers import (
     PrioritizedReplayBuffer,
     RolloutBuffer,
@@ -33,8 +32,9 @@ def test_sum_tree_matches_bruteforce_distribution():
     expected = priorities / priorities.sum()
     assert np.max(np.abs(freq - expected)) < 0.01
     # deterministic for a fixed rng
-    assert np.array_equal(tree.sample(10, np.random.default_rng(3)),
-                          tree.sample(10, np.random.default_rng(3)))
+    assert np.array_equal(
+        tree.sample(10, np.random.default_rng(3)), tree.sample(10, np.random.default_rng(3))
+    )
 
 
 def test_sum_tree_duplicate_indices_stay_consistent():
@@ -129,17 +129,57 @@ def test_rollout_buffer_shapes_and_flatten():
     buf = RolloutBuffer(steps=4, num_envs=3, obs_spec=IMAGE, frames=2, device="cpu")
     for _ in range(4):
         batch = _batch(3, IMAGE)
-        buf.add(batch["obs"].repeat(1, 2, 1, 1, 1), batch["next_obs"].repeat(1, 2, 1, 1, 1),
-                batch["action"], batch["reward"], torch.zeros(3), torch.zeros(3),
-                batch["terminated"], batch["truncated"])
+        buf.add(
+            batch["obs"].repeat(1, 2, 1, 1, 1),
+            batch["next_obs"].repeat(1, 2, 1, 1, 1),
+            batch["action"],
+            batch["reward"],
+            torch.zeros(3),
+            torch.zeros(3),
+            batch["terminated"],
+            batch["truncated"],
+        )
     assert buf.cursor == 4
     flat = buf.flat()
     assert flat["obs"].shape == (12, 2, 2, 3, 3)
     assert flat["action"].shape == (12,)
     with pytest.raises(RuntimeError, match="full"):
         batch = _batch(3, IMAGE)
-        buf.add(batch["obs"].repeat(1, 2, 1, 1, 1), batch["next_obs"].repeat(1, 2, 1, 1, 1),
-                batch["action"], batch["reward"], torch.zeros(3), torch.zeros(3),
-                batch["terminated"], batch["truncated"])
+        buf.add(
+            batch["obs"].repeat(1, 2, 1, 1, 1),
+            batch["next_obs"].repeat(1, 2, 1, 1, 1),
+            batch["action"],
+            batch["reward"],
+            torch.zeros(3),
+            torch.zeros(3),
+            batch["terminated"],
+            batch["truncated"],
+        )
     buf.reset()
     assert buf.cursor == 0
+
+
+def test_replay_batch_to_same_device_is_a_noop():
+    buf = UniformReplayBuffer(BufferConfig(type="uniform", capacity=8), VECTOR, 1, "cpu")
+    buf.add(**_batch(8, VECTOR))
+    batch = buf.sample(4)
+    moved = batch.to(torch.device("cpu"))
+    assert moved is batch  # no copies when the device already matches
+
+
+def test_replay_reuses_its_output_buffers():
+    buf = UniformReplayBuffer(BufferConfig(type="uniform", capacity=8), VECTOR, 1, "cpu")
+    buf.add(**_batch(8, VECTOR))
+    first = buf.sample(4)
+    second = buf.sample(4)
+    assert first.obs.data_ptr() == second.obs.data_ptr()
+    assert first.weights.data_ptr() == second.weights.data_ptr()
+
+
+def test_prioritized_sampling_reports_probabilities():
+    cfg = BufferConfig(type="prioritized", capacity=8, alpha=0.6, beta0=0.4)
+    buf = PrioritizedReplayBuffer(cfg, VECTOR, 1, "cpu", seed=2)
+    buf.add(**_batch(8, VECTOR))
+    batch = buf.sample(32, beta=0.4)
+    assert torch.all(batch.weights > 0)
+    assert torch.all(batch.weights <= 1.0)

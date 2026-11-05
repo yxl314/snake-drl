@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from snake_drl.config import EnvConfig
 from snake_drl.envs import make_env
 
@@ -81,3 +80,17 @@ def test_toy_environments_semantics():
             break
     assert done
     assert np.allclose(result.reward, 1.0)
+
+
+def test_closed_snake_env_raises():
+    env = make_env(EnvConfig(num_envs=2, width=8, height=8, num_threads=1))
+    env.reset()
+    env.close()
+    env.close()  # idempotent
+    with pytest.raises(RuntimeError, match="closed"):
+        env.reset()
+
+
+def test_unknown_environment_type_is_a_config_error():
+    with pytest.raises(ValueError, match="unknown environment type"):
+        make_env(EnvConfig(type="nope", num_envs=1))

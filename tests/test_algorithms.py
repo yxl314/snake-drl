@@ -3,7 +3,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import torch
-
 from snake_drl.algorithms import compute_gae, q_target
 from snake_drl.config import from_dict
 from snake_drl.device import configure_runtime, resolve_device
@@ -71,8 +70,9 @@ def test_dueling_head_centres_advantage():
     feats = torch.randn(5, 4)
     q = head(feats)
     advantage = head.advantage(feats)
-    assert torch.allclose(q - advantage + advantage.mean(dim=1, keepdim=True),
-                          head.value(feats), atol=1e-5)
+    assert torch.allclose(
+        q - advantage + advantage.mean(dim=1, keepdim=True), head.value(feats), atol=1e-5
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -86,8 +86,14 @@ def _bandit_config(**overrides):
         "network": {"encoder": {"type": "mlp", "hidden_dims": [64], "feature_dim": 64}},
         "train": {"total_steps": 4000, "eval_episodes": 40, "eval_every": 10**9},
         "algorithm": {
-            "type": "dqn", "lr": 3e-3, "batch_size": 64, "learning_starts": 128,
-            "eps_decay_steps": 2000, "eps_end": 0.05, "target_update": 200, "train_freq": 1,
+            "type": "dqn",
+            "lr": 3e-3,
+            "batch_size": 64,
+            "learning_starts": 128,
+            "eps_decay_steps": 2000,
+            "eps_end": 0.05,
+            "target_update": 200,
+            "train_freq": 1,
         },
     }
     for key, value in overrides.items():
@@ -110,8 +116,14 @@ def test_dqn_family_learns_bandit():
 
 
 def test_ppo_learns_bandit():
-    raw = _bandit_config(**{"algorithm.learning_starts": None})
-    raw["algorithm"] = {"type": "ppo", "lr": 3e-3, "n_steps": 32, "minibatch_size": 128, "epochs": 4}
+    raw = _bandit_config()
+    raw["algorithm"] = {
+        "type": "ppo",
+        "lr": 3e-3,
+        "n_steps": 32,
+        "minibatch_size": 128,
+        "epochs": 4,
+    }
     raw["train"]["total_steps"] = 3000
     cfg, algorithm = _algorithm(raw)
     while algorithm.env_steps < cfg.train.total_steps:
@@ -131,3 +143,38 @@ def test_prioritized_replay_receives_td_errors():
     assert replay._tree.total > 0
     assert any(m.get("td_abs_mean", 0) > 0 for m in step_metrics if "td_abs_mean" in m)
     algorithm.close()
+
+
+def test_iterations_and_updates_counters_are_consistent():
+    raw = _bandit_config()
+    raw["algorithm"] = {
+        "type": "ppo",
+        "lr": 3e-3,
+        "n_steps": 16,
+        "minibatch_size": 64,
+        "epochs": 2,
+    }
+    cfg, algorithm = _algorithm(raw)
+    reported = 0.0
+    for _ in range(3):
+        metrics = algorithm.iterate()
+        reported += metrics["updates"]
+    assert algorithm.iterations == 3
+    assert algorithm.updates == int(reported)  # optimizer steps, not iterations
+    assert algorithm.updates == 3 * 2 * 4  # epochs * minibatches (16*16/64)
+    state = algorithm.state_dict()
+    assert state["updates"] == algorithm.updates
+    assert state["iterations"] == 3
+    algorithm.close()
+
+
+def test_q_target_requires_online_values_for_double_q():
+    with pytest.raises(ValueError, match="online"):
+        q_target(
+            torch.zeros(2, 3),
+            None,
+            torch.zeros(2),
+            torch.zeros(2, dtype=torch.bool),
+            0.99,
+            double_q=True,
+        )

@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import pytest
-
 from snake_drl.spaces import ActionSpec, ObsSpec
 
 
 def test_obs_spec_image_and_vector():
     image = ObsSpec((3, 8, 8))
     assert image.frame_elems == 3 * 8 * 8
-    assert image.windowed(4) == (4, 3, 8, 8)
     vector = ObsSpec((5,), kind="vector", dtype="float32")
     assert vector.frame_elems == 5
 

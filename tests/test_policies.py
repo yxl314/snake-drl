@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import pytest
 import torch
-
-from snake_drl.config import NetworkConfig, EncoderConfig
+from snake_drl.config import EncoderConfig, NetworkConfig
 from snake_drl.nn import build_policy
 from snake_drl.spaces import ActionSpec, ObsSpec
 
@@ -13,8 +12,9 @@ ACTIONS = ActionSpec(3)
 
 def _network(kind: str = "cnn") -> NetworkConfig:
     return NetworkConfig(
-        encoder=EncoderConfig(type=kind, frames=1, feature_dim=32, hidden_dims=[32],
-                              cnn_channels=[8, 8])
+        encoder=EncoderConfig(
+            type=kind, frames=1, feature_dim=32, hidden_dims=[32], cnn_channels=[8, 8]
+        )
     )
 
 
@@ -47,8 +47,7 @@ def test_q_policy_and_dueling_decomposition():
     feats = dueling.encoder(dueling.prepare(obs))
     value = dueling.head.value(feats)
     advantage = dueling.head.advantage(feats)
-    assert torch.allclose(value, (q2 - advantage + advantage.mean(dim=1, keepdim=True)),
-                          atol=1e-5)
+    assert torch.allclose(value, (q2 - advantage + advantage.mean(dim=1, keepdim=True)), atol=1e-5)
 
 
 def test_head_family_mismatch_is_rejected():
