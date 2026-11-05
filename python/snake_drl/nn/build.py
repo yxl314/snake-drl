@@ -1,5 +1,8 @@
-"""Policy assembly from config. This is the only place that maps a config to a
-concrete network, which keeps the algorithms free of ``if encoder == ...``."""
+"""Policy assembly from config.
+
+This is the only place that maps a config to a concrete network, which keeps the
+algorithms free of ``if encoder == ...`` branching.
+"""
 
 from __future__ import annotations
 
@@ -10,19 +13,21 @@ import torch.nn as nn
 
 from ..config import NetworkConfig
 from ..spaces import ActionSpec, ObsSpec
-from .encoders import Encoder, build_encoder
-from .heads import ActorCriticHead, DuelingQHead, QHead
+from .encoders import build_encoder
+from .heads import ActorCriticHead, DuelingQHead, Head, QHead
 from .policies import ActorCriticPolicy, QPolicy
 
-FAMILIES = ("actor_critic", "q")
+__all__ = ["build_policy", "count_parameters"]
+
+_FAMILIES = ("actor_critic", "q")
 
 
 def _orthogonal_(module: nn.Module, gain: float = math.sqrt(2.0)) -> None:
-    for m in module.modules():
-        if isinstance(m, (nn.Linear, nn.Conv2d)):
-            nn.init.orthogonal_(m.weight, gain)
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
+    for layer in module.modules():
+        if isinstance(layer, (nn.Linear, nn.Conv2d)):
+            nn.init.orthogonal_(layer.weight, gain)
+            if layer.bias is not None:
+                nn.init.zeros_(layer.bias)
 
 
 def build_policy(
@@ -35,29 +40,37 @@ def build_policy(
     dueling: bool = False,
 ) -> nn.Module:
     """Build the policy for ``family`` ("actor_critic" for PPO, "q" for DQN)."""
-    if family not in FAMILIES:
-        raise ValueError(f"policy family must be one of {FAMILIES}, got {family!r}")
-    encoder: Encoder = build_encoder(obs_spec, cfg.encoder)
-    feature_dim = encoder.feature_dim
+    if family not in _FAMILIES:
+        raise ValueError(f"policy family must be one of {_FAMILIES}, got {family!r}")
+    _check_head(cfg.head, family)
 
-    if cfg.head != "auto" and cfg.head == "actor_critic" and family != "actor_critic":
-        raise ValueError("network.head=actor_critic is only valid for PPO")
-    if cfg.head in ("q", "dueling_q") and family != "q":
-        raise ValueError(f"network.head={cfg.head} is only valid for the DQN family")
-
+    encoder = build_encoder(obs_spec, cfg.encoder)
+    head: Head
     if family == "actor_critic":
-        head: nn.Module = ActorCriticHead(feature_dim, action_spec.n)
+        head = ActorCriticHead(encoder.feature_dim, action_spec.n)
         policy: nn.Module = ActorCriticPolicy(encoder, head, obs_spec, action_spec)
     else:
-        head = DuelingQHead(feature_dim, action_spec.n) if dueling else QHead(feature_dim, action_spec.n)
+        head = (
+            DuelingQHead(encoder.feature_dim, action_spec.n)
+            if dueling
+            else QHead(encoder.feature_dim, action_spec.n)
+        )
         policy = QPolicy(encoder, head, obs_spec, action_spec)
 
     if cfg.ortho_init:
         _orthogonal_(encoder)
         _orthogonal_(head)
-        head.init_outputs()  # type: ignore[attr-defined]
+        head.init_outputs()
     return policy.to(torch.device(device))
 
 
+def _check_head(head: str, family: str) -> None:
+    if head == "actor_critic" and family != "actor_critic":
+        raise ValueError("network.head=actor_critic is only valid for PPO")
+    if head in ("q", "dueling_q") and family != "q":
+        raise ValueError(f"network.head={head} is only valid for the DQN family")
+
+
 def count_parameters(module: nn.Module) -> int:
+    """Number of trainable parameters."""
     return sum(p.numel() for p in module.parameters() if p.requires_grad)

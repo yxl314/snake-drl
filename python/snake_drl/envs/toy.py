@@ -1,22 +1,33 @@
 """Deterministic toy environments for tests and algorithm sanity checks.
 
 They implement the same autoreset semantics as the engine, so the runner,
-buffers and algorithms can be exercised without the C++ extension.
+buffers and algorithms can be exercised without the C++ extension.  Both are
+Markov in the one-hot position only -- no hidden counters or step-dependent
+rules, which matters because a non-Markov test MDP silently breaks Q-learning.
+
+They are registered like any other environment, so a config can select them:
+
+.. code-block:: yaml
+
+    env: {type: corridor, num_envs: 16, max_episode_steps: 30,
+          kwargs: {length: 6}}
 """
 
 from __future__ import annotations
 
-from typing import Callable
-
 import numpy as np
 
+from ..config import EnvConfig
+from ..registry import register
 from ..spaces import ActionSpec, ObsSpec
-from .base import ENVS, StepResult, VectorEnv
+from .base import StepResult, VectorEnv
+from .registry import ENVS
+
+__all__ = ["BanditEnv", "CorridorEnv", "make_bandit", "make_corridor"]
 
 
 class _NumpyEnv(VectorEnv):
-    obs_spec: ObsSpec
-    action_spec: ActionSpec
+    """Shared bookkeeping for the numpy-only toy environments."""
 
     def __init__(self, num_envs: int, seed: int = 0) -> None:
         self.num_envs = int(num_envs)
@@ -41,6 +52,7 @@ class BanditEnv(_NumpyEnv):
         self.obs_spec = ObsSpec((self.n_ctx,), kind="vector", dtype="float32")
         self.action_spec = ActionSpec(self.n_ctx)
         super().__init__(num_envs, seed)
+        self._ctx = np.zeros(self.num_envs, dtype=np.int64)
 
     def _obs(self, ctx: np.ndarray) -> np.ndarray:
         out = np.zeros((self.num_envs, self.n_ctx), dtype=np.float32)
@@ -68,14 +80,16 @@ class CorridorEnv(_NumpyEnv):
     Reaching the right end terminates with +1.0; walking off the left end
     terminates with -1.0.  Every transition depends only on ``(position,
     action)``, so the MDP is fully observable from the one-hot position, and it
-    is acyclic: values are bounded in [-1, 1] and bootstrapping cannot inflate.
-    The optimal policy is "always right" (return 1.0).  ``max_episode_steps``
+    is acyclic: values stay in [-1, 1] and bootstrapping cannot inflate.  The
+    optimal policy is "always right" (return 1.0).  ``max_episode_steps``
     produces genuine truncations for bootstrap tests.
     """
 
     def __init__(
         self, num_envs: int = 8, length: int = 6, max_episode_steps: int = 0, seed: int = 0
     ) -> None:
+        if length < 2:
+            raise ValueError(f"corridor length must be >= 2, got {length}")
         self.length = int(length)
         self.max_episode_steps = int(max_episode_steps)
         self.obs_spec = ObsSpec((self.length,), kind="vector", dtype="float32")
@@ -100,12 +114,14 @@ class CorridorEnv(_NumpyEnv):
         walking_off = (actions == 0) & (self._pos == 0)
         self._pos = np.clip(self._pos + np.where(actions == 1, 1, -1), 0, self.length - 1)
         self._steps += 1
+
         reward = np.zeros(self.num_envs, dtype=np.float32)
         terminated = np.zeros(self.num_envs, dtype=bool)
         reward[self._pos == self.length - 1] = 1.0
         terminated[self._pos == self.length - 1] = True
         reward[walking_off] = -1.0
         terminated[walking_off] = True
+
         truncated = np.zeros(self.num_envs, dtype=bool)
         if self.max_episode_steps:
             truncated = (self._steps >= self.max_episode_steps) & ~terminated
@@ -120,21 +136,20 @@ class CorridorEnv(_NumpyEnv):
         return StepResult(self._obs(), reward, terminated, truncated, final)
 
 
-@ENVS.register("bandit")
-def make_bandit(num_envs: int = 8, n_ctx: int = 3, seed: int = 0) -> BanditEnv:
-    return BanditEnv(num_envs=num_envs, n_ctx=n_ctx, seed=seed)
-
-
-@ENVS.register("corridor")
-def make_corridor(
-    num_envs: int = 8, length: int = 6, max_episode_steps: int = 0, seed: int = 0
-) -> CorridorEnv:
-    return CorridorEnv(
-        num_envs=num_envs, length=length, max_episode_steps=max_episode_steps, seed=seed
+@register(ENVS, "bandit")
+def make_bandit(cfg: EnvConfig, *, seed: int | None = None) -> BanditEnv:
+    return BanditEnv(
+        num_envs=cfg.num_envs,
+        n_ctx=int(cfg.kwargs.get("n_ctx", 3)),
+        seed=cfg.seed if seed is None else seed,
     )
 
 
-TOY_ENVS: dict[str, Callable[..., VectorEnv]] = {
-    "bandit": make_bandit,
-    "corridor": make_corridor,
-}
+@register(ENVS, "corridor")
+def make_corridor(cfg: EnvConfig, *, seed: int | None = None) -> CorridorEnv:
+    return CorridorEnv(
+        num_envs=cfg.num_envs,
+        length=int(cfg.kwargs.get("length", 6)),
+        max_episode_steps=cfg.max_episode_steps,
+        seed=cfg.seed if seed is None else seed,
+    )

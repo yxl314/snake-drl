@@ -10,22 +10,28 @@ Storage choices, all measured:
   not allocate: 6.6 us for 256 images on 4 torch threads;
 * the prioritized variant uses a vectorized sum tree (:mod:`.sumtree`), 67 us
   for 256 samples.
+
+Only the sampled minibatch is pinned, not the whole storage: pinning 100k
+observations would exhaust the pinned pool and is useless -- only the source of
+an asynchronous host-to-device copy has to be pinned.
 """
 
 from __future__ import annotations
 
-from typing import Tuple
+from collections.abc import Iterable
 
 import numpy as np
 import torch
 
+from .._dtypes import torch_dtype
 from ..config import BufferConfig
 from ..registry import register
 from ..spaces import ObsSpec
-from .base import BUFFERS, ReplayBatch
+from .batch import ReplayBatch
+from .registry import BUFFERS
 from .sumtree import SumTree
 
-_TORCH_DTYPES = {"uint8": torch.uint8, "float32": torch.float32}
+__all__ = ["PrioritizedReplayBuffer", "UniformReplayBuffer"]
 
 
 class _TensorReplay:
@@ -41,45 +47,33 @@ class _TensorReplay:
         pin_memory: bool = False,
         seed: int = 0,
     ) -> None:
+        if cfg.capacity < 1:
+            raise ValueError("buffer capacity must be >= 1")
+        if frames < 1:
+            raise ValueError("frames must be >= 1")
         self.capacity = int(cfg.capacity)
         self.frames = int(frames)
         self.device = torch.device(device)
         self._rng = np.random.default_rng(seed)
         self._pos = 0
         self._size = 0
-        window = (self.frames, *obs_spec.shape)
-        dtype = _TORCH_DTYPES[obs_spec.dtype]
-        pin = bool(pin_memory) and self.device.type == "cpu" and torch.cuda.is_available()
+        self._batch = 0
+        self._pin_outputs = (
+            bool(pin_memory) and self.device.type == "cpu" and torch.cuda.is_available()
+        )
 
-        self._obs = torch.empty((self.capacity, *window), dtype=dtype, device=self.device, pin_memory=pin)
+        window = (self.frames, *obs_spec.shape)
+        dtype = torch_dtype(obs_spec)
+        self._obs = torch.empty((self.capacity, *window), dtype=dtype, device=self.device)
         self._next_obs = torch.empty_like(self._obs)
         self._action = torch.empty(self.capacity, dtype=torch.int64, device=self.device)
         self._reward = torch.empty(self.capacity, dtype=torch.float32, device=self.device)
         self._terminated = torch.empty(self.capacity, dtype=torch.bool, device=self.device)
         self._truncated = torch.empty(self.capacity, dtype=torch.bool, device=self.device)
-        self._batch = 0
 
     # ------------------------------------------------------------- storage
     def __len__(self) -> int:
         return self._size
-
-    @property
-    def position(self) -> int:
-        return self._pos
-
-    def _write(self, start: int, count: int, **arrays: torch.Tensor) -> None:
-        """Write ``count`` contiguous slots from ``start``, wrapping if needed."""
-        end = start + count
-        cap = self.capacity
-        if end <= cap:
-            for name, value in arrays.items():
-                getattr(self, name)[start:end].copy_(value)
-            return
-        head = cap - start
-        for name, value in arrays.items():
-            dst = getattr(self, name)
-            dst[start:].copy_(value[:head])
-            dst[: end - cap].copy_(value[head:])
 
     def add(
         self,
@@ -90,25 +84,46 @@ class _TensorReplay:
         terminated: torch.Tensor,
         truncated: torch.Tensor,
     ) -> None:
+        """Append a batch of transitions, wrapping around at the end."""
         count = int(action.shape[0])
+        if count == 0:
+            return
         if count > self.capacity:
-            raise ValueError("cannot add more transitions than the buffer capacity")
+            raise ValueError(
+                f"cannot add {count} transitions to a buffer of capacity {self.capacity}"
+            )
         self._write(
             self._pos,
             count,
-            _obs=obs,
-            _next_obs=next_obs,
-            _action=action,
-            _reward=reward,
-            _terminated=terminated,
-            _truncated=truncated,
+            (
+                (self._obs, obs),
+                (self._next_obs, next_obs),
+                (self._action, action),
+                (self._reward, reward),
+                (self._terminated, terminated),
+                (self._truncated, truncated),
+            ),
         )
         self._pos = (self._pos + count) % self.capacity
         self._size = min(self._size + count, self.capacity)
         self._on_add(count)
 
-    def _on_add(self, count: int) -> None:  # hook for prioritized
-        pass
+    def _write(
+        self, start: int, count: int, pairs: Iterable[tuple[torch.Tensor, torch.Tensor]]
+    ) -> None:
+        """Copy ``count`` contiguous slots from ``start``, splitting on wrap."""
+        end = start + count
+        if end <= self.capacity:
+            for dst, src in pairs:
+                dst[start:end].copy_(src)
+            return
+        head = self.capacity - start
+        for dst, src in pairs:
+            dst[start:].copy_(src[:head])
+            dst[: end - self.capacity].copy_(src[head:])
+
+    def _on_add(self, count: int) -> None:
+        """Hook for subclasses that keep auxiliary indexes (e.g. priorities)."""
 
     # ------------------------------------------------------------- sampling
     def _ensure_batch(self, batch_size: int) -> None:
@@ -116,25 +131,38 @@ class _TensorReplay:
             return
         self._batch = batch_size
         shape = (batch_size, self.frames, *self._obs.shape[2:])
-        self._out_obs = torch.empty(shape, dtype=self._obs.dtype, device=self.device)
-        self._out_next = torch.empty(shape, dtype=self._obs.dtype, device=self.device)
-        self._out_action = torch.empty(batch_size, dtype=torch.int64, device=self.device)
-        self._out_reward = torch.empty(batch_size, dtype=torch.float32, device=self.device)
-        self._out_terminated = torch.empty(batch_size, dtype=torch.bool, device=self.device)
-        self._out_truncated = torch.empty(batch_size, dtype=torch.bool, device=self.device)
+        self._out_obs = torch.empty(
+            shape, dtype=self._obs.dtype, device=self.device, pin_memory=self._pin_outputs
+        )
+        self._out_next = torch.empty_like(self._out_obs)
+        self._out_action = torch.empty(
+            batch_size, dtype=torch.int64, device=self.device, pin_memory=self._pin_outputs
+        )
+        self._out_reward = torch.empty(
+            batch_size, dtype=torch.float32, device=self.device, pin_memory=self._pin_outputs
+        )
+        self._out_terminated = torch.empty(
+            batch_size, dtype=torch.bool, device=self.device, pin_memory=self._pin_outputs
+        )
+        self._out_truncated = torch.empty_like(self._out_terminated)
+        self._out_weights = torch.empty(
+            batch_size, dtype=torch.float32, device=self.device, pin_memory=self._pin_outputs
+        )
 
-    def _draw(self, batch_size: int, beta: float) -> Tuple[np.ndarray, np.ndarray]:
-        idx = self._rng.integers(0, self._size, batch_size)
-        return idx, np.ones(batch_size, dtype=np.float32)
+    def _draw(self, batch_size: int, beta: float) -> np.ndarray:
+        """Sample slot indices and fill ``self._out_weights``."""
+        self._out_weights.fill_(1.0)
+        return self._rng.integers(0, self._size, batch_size)
 
     def sample(self, batch_size: int, beta: float = 1.0) -> ReplayBatch:
+        """Gather a minibatch; sampling is with replacement."""
         if self._size == 0:
             raise RuntimeError("cannot sample from an empty buffer")
         if batch_size < 1:
             raise ValueError("batch_size must be >= 1")
         self._ensure_batch(batch_size)
-        idx_np, weights_np = self._draw(batch_size, beta)
-        idx = torch.as_tensor(idx_np, dtype=torch.int64, device=self.device)
+        indices = self._draw(batch_size, beta)
+        idx = torch.as_tensor(indices, dtype=torch.int64, device=self.device)
         torch.index_select(self._obs, 0, idx, out=self._out_obs)
         torch.index_select(self._next_obs, 0, idx, out=self._out_next)
         torch.index_select(self._action, 0, idx, out=self._out_action)
@@ -149,29 +177,16 @@ class _TensorReplay:
             terminated=self._out_terminated,
             truncated=self._out_truncated,
             indices=idx,
-            weights=torch.as_tensor(weights_np, dtype=torch.float32, device=self.device),
+            weights=self._out_weights,
         )
 
     def update_priorities(self, indices: torch.Tensor, priorities: torch.Tensor) -> None:
-        pass
-
-    def nbytes(self) -> int:
-        return sum(
-            t.numel() * t.element_size()
-            for t in (
-                self._obs,
-                self._next_obs,
-                self._action,
-                self._reward,
-                self._terminated,
-                self._truncated,
-            )
-        )
+        """No-op for uniform replay; part of the buffer protocol."""
 
 
 @register(BUFFERS, "uniform")
 class UniformReplayBuffer(_TensorReplay):
-    """Plain ring buffer with uniform sampling."""
+    """Ring buffer with uniform sampling."""
 
 
 @register(BUFFERS, "prioritized")
@@ -195,24 +210,24 @@ class PrioritizedReplayBuffer(_TensorReplay):
         self._max_priority = 1.0
 
     def _on_add(self, count: int) -> None:
-        # New transitions get the current max priority so they are sampled at
-        # least once; tree leaves are aligned with the ring slots.  ``self._pos``
-        # has already been advanced past the freshly written slots.
+        # New transitions get the current maximum priority so they are sampled
+        # at least once.  ``self._pos`` has already advanced past the new slots.
         start = (self._pos - count) % self.capacity
-        idx = (start + np.arange(count)) % self.capacity
-        self._tree.update(idx, np.full(count, self._max_priority, dtype=np.float64))
+        indices = (start + np.arange(count)) % self.capacity
+        self._tree.update(indices, np.full(count, self._max_priority, dtype=np.float64))
 
-    def _draw(self, batch_size: int, beta: float) -> Tuple[np.ndarray, np.ndarray]:
-        idx = self._tree.sample(batch_size, self._rng)
-        priorities = self._tree.levels[0][idx]
-        probs = priorities / self._tree.total
-        weights = (self._size * probs) ** (-beta)
-        weights = weights / weights.max()
-        return idx, weights.astype(np.float32, copy=False)
+    def _draw(self, batch_size: int, beta: float) -> np.ndarray:
+        indices = self._tree.sample(batch_size, self._rng)
+        priorities = self._tree.levels[0][indices]
+        probabilities = priorities / self._tree.total
+        weights = (self._size * probabilities) ** (-beta)
+        weights /= weights.max()
+        self._out_weights.copy_(torch.from_numpy(weights.astype(np.float32, copy=False)))
+        return indices
 
     def update_priorities(self, indices: torch.Tensor, priorities: torch.Tensor) -> None:
-        idx_np = indices.detach().to("cpu", dtype=torch.int64).numpy()
-        prio_np = priorities.detach().to("cpu", dtype=torch.float64).numpy()
-        prio_np = np.power(np.abs(prio_np) + self.eps, self.alpha)
-        self._tree.update(idx_np, prio_np)
-        self._max_priority = max(self._max_priority, float(prio_np.max()))
+        idx = indices.detach().to("cpu", dtype=torch.int64).numpy()
+        values = priorities.detach().to("cpu", dtype=torch.float64).numpy()
+        values = np.power(np.abs(values) + self.eps, self.alpha)
+        self._tree.update(idx, values)
+        self._max_priority = max(self._max_priority, float(values.max()))

@@ -4,8 +4,8 @@ The engine is CPU-only and runs its own thread pool; torch defaults to one
 intra-op thread per core.  Both at full width oversubscribes the machine --
 measured on an 8-vCPU aarch64 box, ``torch.set_num_threads(8)`` made a 196 KiB
 ``copy_`` ~60x slower than with 4 threads (one straggler thread stalls every
-OpenMP barrier).  The defaults here are therefore deliberately conservative and
-tunable through ``run.torch_threads``.
+OpenMP barrier), and end-to-end steps ~2x slower.  The defaults here are
+therefore deliberately conservative and tunable through ``run.torch_threads``.
 """
 
 from __future__ import annotations
@@ -14,6 +14,8 @@ import os
 from dataclasses import dataclass
 
 import torch
+
+__all__ = ["Runtime", "auto_torch_threads", "configure_runtime", "resolve_device"]
 
 _MPS = getattr(torch.backends, "mps", None)
 
@@ -47,12 +49,10 @@ def auto_torch_threads() -> int:
 
 @dataclass(frozen=True)
 class Runtime:
+    """Process-wide settings resolved once at start-up."""
+
     device: torch.device
     torch_threads: int
-
-    @property
-    def is_cuda(self) -> bool:
-        return self.device.type == "cuda"
 
 
 def configure_runtime(device: torch.device, torch_threads: int = 0) -> Runtime:

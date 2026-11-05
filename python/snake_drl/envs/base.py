@@ -1,8 +1,8 @@
 """Vectorized environment interface.
 
-Deliberately numpy-only: the environment layer knows nothing about torch, the
-algorithms or the buffers.  An environment is a batch of ``N`` independent games
-stepped in lockstep, with the same ``terminated/truncated`` split gymnasium uses.
+This layer is numpy-only: it knows nothing about torch, algorithms or buffers.
+An environment is a batch of ``N`` independent games stepped in lockstep, with
+the same ``terminated``/``truncated`` split gymnasium uses.
 
 Autoreset convention (identical to the engine): the step that ends an episode
 also resets it, so every step produces a usable transition.  The final
@@ -15,12 +15,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 import numpy as np
 
-from ..registry import Registry
 from ..spaces import ActionSpec, ObsSpec
+
+__all__ = ["StepResult", "VectorEnv"]
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class StepResult:
     reward: np.ndarray
     terminated: np.ndarray
     truncated: np.ndarray
-    final_obs: Optional[np.ndarray]
+    final_obs: np.ndarray | None
 
 
 class VectorEnv(ABC):
@@ -54,14 +54,11 @@ class VectorEnv(ABC):
     def step(self, actions: np.ndarray) -> StepResult:
         """Apply one action per environment."""
 
-    def close(self) -> None:
-        """Release engine resources (no-op by default)."""
+    def close(self) -> None:  # noqa: B027 - optional hook, safe to leave empty
+        """Release resources. Must be safe to call more than once."""
 
-    def __enter__(self) -> "VectorEnv":
+    def __enter__(self) -> VectorEnv:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
         self.close()
-
-
-ENVS: Registry[Callable[..., VectorEnv]] = Registry("environment")

@@ -1,26 +1,44 @@
 """Typed configuration objects and YAML loading.
 
 Design:
-  * every configurable component has one dataclass; unknown keys are rejected
-    (``dacite`` strict mode) so a typo cannot silently fall back to a default;
-  * YAML loading/merging/CLI overrides use ``omegaconf`` instead of a
-    hand-written parser;
-  * the algorithm block is dispatched on its ``type`` because PPO and the DQN
-    family genuinely need different hyper-parameters.
+
+* every configurable component has one dataclass; unknown keys are rejected
+  (``dacite`` strict mode) so a typo cannot silently fall back to a default;
+* YAML loading/merging/CLI overrides use ``omegaconf`` instead of a
+  hand-written parser;
+* the algorithm block is dispatched on its ``type`` because PPO and the DQN
+  family genuinely need different hyper-parameters.
 
 All sizes default to something that runs on CPU; GPU users scale them up.
 """
 
 from __future__ import annotations
 
-import ast
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 import dacite
 from omegaconf import OmegaConf
 
-_CASTS = [int, float, str]
+__all__ = [
+    "ALGORITHM_CONFIGS",
+    "BufferConfig",
+    "DQNConfig",
+    "EncoderConfig",
+    "EnvConfig",
+    "NetworkConfig",
+    "PPOConfig",
+    "ProjectConfig",
+    "RunConfig",
+    "TrainConfig",
+    "apply_overrides",
+    "from_dict",
+    "load",
+    "to_dict",
+]
+
+# Values OmegaConf may hand back as strings; dacite coerces them.
+_CASTS = (int, float, str)
 
 
 # --------------------------------------------------------------------------- #
@@ -28,6 +46,13 @@ _CASTS = [int, float, str]
 # --------------------------------------------------------------------------- #
 @dataclass
 class EnvConfig:
+    """Environment selection and its generic knobs.
+
+    ``kwargs`` carries environment-specific constructor arguments that do not
+    deserve a top-level field (the toy environments use ``length`` and
+    ``n_ctx``); the snake adapter ignores it.
+    """
+
     type: str = "snake"
     num_envs: int = 256
     width: int = 16
@@ -45,9 +70,7 @@ class EnvConfig:
     seed: int = 0
     num_threads: int = 0
     parallel_threshold: int = 128
-    # extra constructor arguments for third-party environments (the toy ones use
-    # it for ``length`` / ``max_episode_steps``); ignored by the snake adapter.
-    kwargs: Dict[str, Any] = field(default_factory=dict)
+    kwargs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.action_mode not in ("relative", "absolute"):
@@ -76,8 +99,8 @@ class EncoderConfig:
     type                reads
     ==================  =====================================================
     mlp                 hidden_dims, layer_norm, dropout
-    cnn                 cnn_channels, cnn_kernel, cnn_pool, feature_dim
-    gru                 gru_hidden, gru_layers, layer_norm
+    cnn                 cnn_channels, cnn_kernel, cnn_pool
+    gru                 gru_hidden, gru_layers, dropout
     transformer         tf_d_model, tf_layers, tf_heads, tf_ff, dropout
     convgru             cnn_channels, cnn_kernel, cnn_pool
     convtransformer     cnn_channels, cnn_kernel, cnn_pool, tf_d_model,
@@ -92,10 +115,10 @@ class EncoderConfig:
     type: str = "cnn"
     frames: int = 1
     feature_dim: int = 256
-    hidden_dims: List[int] = field(default_factory=lambda: [256, 256])
+    hidden_dims: list[int] = field(default_factory=lambda: [256, 256])
     layer_norm: bool = True
     dropout: float = 0.0
-    cnn_channels: List[int] = field(default_factory=lambda: [32, 64, 64])
+    cnn_channels: list[int] = field(default_factory=lambda: [32, 64, 64])
     cnn_kernel: int = 3
     cnn_pool: int = 2
     gru_hidden: int = 128
@@ -105,32 +128,34 @@ class EncoderConfig:
     tf_heads: int = 4
     tf_ff: int = 256
 
+    _TEMPORAL = ("gru", "transformer", "convgru", "convtransformer")
+    _ALL = ("mlp", "cnn", "gru", "transformer", "convgru", "convtransformer")
+
     def __post_init__(self) -> None:
+        if self.type not in self._ALL:
+            raise ValueError(
+                f"network.encoder.type must be one of {'/'.join(self._ALL)}, got {self.type!r}"
+            )
         if self.frames < 1:
             raise ValueError("network.encoder.frames must be >= 1")
+        if self.type in self._TEMPORAL and self.frames < 2:
+            raise ValueError(f"encoder {self.type!r} is temporal; set network.encoder.frames >= 2")
         if self.feature_dim < 1:
             raise ValueError("network.encoder.feature_dim must be >= 1")
-        if self.type in ("gru", "transformer", "convgru", "convtransformer") and self.frames < 2:
-            raise ValueError(
-                f"encoder {self.type!r} is temporal; set network.encoder.frames >= 2"
-            )
-        if self.type not in ("mlp", "cnn", "gru", "transformer", "convgru", "convtransformer"):
-            raise ValueError(
-                "network.encoder.type must be one of mlp/cnn/gru/transformer/convgru/"
-                f"convtransformer, got {self.type!r}"
-            )
         if self.cnn_pool not in (1, 2, 4):
             raise ValueError("network.encoder.cnn_pool must be 1, 2 or 4")
-        if self.tf_d_model % self.tf_heads:
-            raise ValueError("network.encoder.tf_d_model must be divisible by tf_heads")
         if not self.cnn_channels:
             raise ValueError("network.encoder.cnn_channels must not be empty")
+        if self.tf_d_model % self.tf_heads:
+            raise ValueError("network.encoder.tf_d_model must be divisible by tf_heads")
+        if not (0.0 <= self.dropout < 1.0):
+            raise ValueError("network.encoder.dropout must be in [0, 1)")
 
 
 @dataclass
 class NetworkConfig:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
-    # "auto" -> actor_critic for PPO, dueling_q/q for the DQN family.
+    # "auto" -> actor_critic for PPO, q/dueling_q for the DQN family.
     head: str = "auto"
     ortho_init: bool = True
 
@@ -163,6 +188,8 @@ class BufferConfig:
             raise ValueError("buffer.alpha must be >= 0")
         if not (0.0 <= self.beta0 <= 1.0):
             raise ValueError("buffer.beta0 must be in [0, 1]")
+        if self.beta_steps < 1:
+            raise ValueError("buffer.beta_steps must be >= 1")
 
 
 # --------------------------------------------------------------------------- #
@@ -183,7 +210,7 @@ class PPOConfig:
     entropy_coef: float = 0.01
     max_grad_norm: float = 0.5
     normalize_advantage: bool = True
-    target_kl: Optional[float] = None
+    target_kl: float | None = None
     lr_schedule: str = "constant"  # "constant" | "linear"
     adam_eps: float = 1e-5
 
@@ -212,10 +239,9 @@ class DQNConfig:
     # same as one update per vector step.
     train_freq: int = 4
     gradient_steps: int = 1  # gradient steps per trigger
-    max_grad_norm: float = 10.0
-    double_q: Optional[bool] = None
-    dueling: Optional[bool] = None
-    grad_clip: bool = True
+    max_grad_norm: float = 10.0  # 0 disables clipping
+    double_q: bool | None = None
+    dueling: bool | None = None
     adam_eps: float = 1e-8
     eps_start: float = 1.0
     eps_end: float = 0.05
@@ -223,13 +249,13 @@ class DQNConfig:
 
     def __post_init__(self) -> None:
         if self.type not in ("dqn", "ddqn", "d3qn"):
-            raise ValueError(
-                f"algorithm.type must be one of dqn/ddqn/d3qn, got {self.type!r}"
-            )
+            raise ValueError(f"algorithm.type must be one of dqn/ddqn/d3qn, got {self.type!r}")
         if self.batch_size < 1 or self.gradient_steps < 1 or self.train_freq < 1:
             raise ValueError("dqn: batch_size, gradient_steps and train_freq must be >= 1")
         if not (0.0 <= self.tau <= 1.0):
             raise ValueError("dqn.tau must be in [0, 1]")
+        if self.target_update < 1 or self.learning_starts < 0:
+            raise ValueError("dqn: target_update must be >= 1 and learning_starts >= 0")
 
     @property
     def is_double(self) -> bool:
@@ -244,7 +270,7 @@ class DQNConfig:
         return self.type == "d3qn"
 
 
-ALGORITHM_CONFIGS: Dict[str, type] = {
+ALGORITHM_CONFIGS: dict[str, type] = {
     "ppo": PPOConfig,
     "dqn": DQNConfig,
     "ddqn": DQNConfig,
@@ -281,6 +307,8 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.total_steps < 1:
             raise ValueError("train.total_steps must be >= 1")
+        if min(self.log_every, self.eval_every, self.eval_episodes) < 1:
+            raise ValueError("train.log_every, eval_every and eval_episodes must be >= 1")
 
 
 @dataclass
@@ -289,7 +317,7 @@ class ProjectConfig:
     env: EnvConfig = field(default_factory=EnvConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     buffer: BufferConfig = field(default_factory=BufferConfig)
-    algorithm: Union[PPOConfig, DQNConfig] = field(default_factory=DQNConfig)
+    algorithm: PPOConfig | DQNConfig = field(default_factory=DQNConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
 
     def __post_init__(self) -> None:
@@ -300,8 +328,20 @@ class ProjectConfig:
         if isinstance(self.algorithm, DQNConfig) and self.algorithm.type == "ppo":
             raise ValueError("DQNConfig.type must be dqn/ddqn/d3qn")
 
+    @property
+    def policy_family(self) -> str:
+        """``"actor_critic"`` for PPO, ``"q"`` for the DQN family."""
+        return "actor_critic" if isinstance(self.algorithm, PPOConfig) else "q"
 
-def _algorithm_from_dict(raw: Dict[str, Any]) -> Union[PPOConfig, DQNConfig]:
+    @property
+    def is_on_policy(self) -> bool:
+        return isinstance(self.algorithm, PPOConfig)
+
+
+# --------------------------------------------------------------------------- #
+# loading
+# --------------------------------------------------------------------------- #
+def _algorithm_from_dict(raw: dict[str, Any]) -> PPOConfig | DQNConfig:
     kind = str(raw.get("type", "dqn")).lower()
     try:
         config_cls = ALGORITHM_CONFIGS[kind]
@@ -311,37 +351,43 @@ def _algorithm_from_dict(raw: Dict[str, Any]) -> Union[PPOConfig, DQNConfig]:
     return dacite.from_dict(config_cls, raw, config=dacite.Config(strict=True, cast=_CASTS))
 
 
-def from_dict(raw: Dict[str, Any]) -> ProjectConfig:
+def from_dict(raw: dict[str, Any]) -> ProjectConfig:
     """Build a validated :class:`ProjectConfig` from a plain dictionary."""
     if not isinstance(raw, dict):
         raise TypeError(f"config root must be a mapping, got {type(raw).__name__}")
-    algorithm = _algorithm_from_dict(raw.get("algorithm", {}))
-    rest = {k: v for k, v in raw.items() if k != "algorithm"}
-    cfg = dacite.from_dict(ProjectConfig, rest, config=dacite.Config(strict=True, cast=_CASTS))
+    data = dict(raw)
+    algorithm = _algorithm_from_dict(data.pop("algorithm", {}))
+    cfg = dacite.from_dict(ProjectConfig, data, config=dacite.Config(strict=True, cast=_CASTS))
     cfg.algorithm = algorithm
     return cfg
 
 
-def load(path: str | None = None, overrides: List[str] | None = None) -> ProjectConfig:
+def apply_overrides(raw: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
+    """Apply ``key.path=value`` overrides to a raw config dictionary."""
+    if not overrides:
+        return raw
+    merged = OmegaConf.merge(OmegaConf.create(raw), OmegaConf.from_dotlist(list(overrides)))
+    return OmegaConf.to_container(merged, resolve=True)  # type: ignore[return-value]
+
+
+def load(path: str | None = None, overrides: list[str] | None = None) -> ProjectConfig:
     """Load YAML (optional) and apply ``key.path=value`` overrides.
 
     Example::
 
         cfg = load("configs/dqn_cnn.yaml", ["train.total_steps=10000"])
     """
-    raw = OmegaConf.create({})
+    raw = {}
     if path:
-        raw = OmegaConf.merge(raw, OmegaConf.load(path))
-    if overrides:
-        raw = OmegaConf.merge(raw, OmegaConf.from_dotlist(list(overrides)))
-    return from_dict(OmegaConf.to_container(raw, resolve=True))  # type: ignore[arg-type]
+        raw = OmegaConf.to_container(OmegaConf.load(path), resolve=True)  # type: ignore[assignment]
+    return from_dict(apply_overrides(dict(raw), list(overrides or [])))
 
 
-def to_dict(obj: Any) -> Dict[str, Any]:
+def to_dict(obj: Any) -> dict[str, Any]:
     """Plain, JSON/YAML-safe view of a dataclass config."""
     if not is_dataclass(obj):
         raise TypeError(f"expected a dataclass config, got {type(obj).__name__}")
-    out: Dict[str, Any] = {}
+    out: dict[str, Any] = {}
     for f in fields(obj):
         value = getattr(obj, f.name)
         if is_dataclass(value):
@@ -351,14 +397,3 @@ def to_dict(obj: Any) -> Dict[str, Any]:
         else:
             out[f.name] = value
     return out
-
-
-def parse_override(text: str) -> tuple[str, Any]:
-    """``"a.b=3"`` -> ``("a.b", 3)``; used by the CLI."""
-    if "=" not in text:
-        raise ValueError(f"override must look like key=value, got {text!r}")
-    key, value = text.split("=", 1)
-    try:
-        return key.strip(), ast.literal_eval(value)
-    except (ValueError, SyntaxError):
-        return key.strip(), value

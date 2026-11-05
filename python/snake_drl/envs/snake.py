@@ -15,10 +15,13 @@ from .._snake_core import AutoresetMode, ObsMode, VecConfig, VecSnake
 from ..config import EnvConfig
 from ..registry import register
 from ..spaces import ActionSpec, ObsSpec
-from .base import ENVS, StepResult, VectorEnv
+from .base import StepResult, VectorEnv
+from .registry import ENVS
 
 _RELATIVE_ACTIONS = 3  # straight, right, left
 _ABSOLUTE_ACTIONS = 4  # up, right, down, left
+
+__all__ = ["SnakeVecEnv", "make_snake"]
 
 
 class SnakeVecEnv(VectorEnv):
@@ -43,8 +46,7 @@ class SnakeVecEnv(VectorEnv):
         vec.num_threads = cfg.num_threads
         vec.parallel_threshold = cfg.parallel_threshold
 
-        self._cfg = cfg
-        self._env = VecSnake(vec)
+        self._engine: VecSnake | None = VecSnake(vec)
         self._actions = np.zeros(cfg.num_envs, dtype=np.int8)
         self.num_envs = cfg.num_envs
         self.obs_spec = ObsSpec((3, cfg.height, cfg.width), "image", "uint8", 1.0)
@@ -54,42 +56,38 @@ class SnakeVecEnv(VectorEnv):
 
     # ------------------------------------------------------------------ core
     def reset(self) -> np.ndarray:
-        self._env.reset_all()
-        return self._env.observations()
+        env = self._require_engine()
+        env.reset_all()
+        return env.observations()
 
     def step(self, actions: np.ndarray) -> StepResult:
+        env = self._require_engine()
         self._actions[:] = actions
-        self._env.step(self._actions)
+        env.step(self._actions)
 
-        terminated = self._env.terminated()
-        truncated = self._env.truncated()
+        terminated = env.terminated()
+        truncated = env.truncated()
         final_obs = None
-        if self._env.dones().any():
-            final_obs = self._env.final_observations()
+        if env.dones().any():
+            final_obs = env.final_observations()
         return StepResult(
-            obs=self._env.observations(),
-            reward=self._env.rewards(),
+            obs=env.observations(),
+            reward=env.rewards(),
             terminated=terminated,
             truncated=truncated,
             final_obs=final_obs,
         )
 
-    # --------------------------------------------------------------- extras
-    def seed(self, seed: int) -> None:
-        self._env.reseed_all(seed)
-
     def close(self) -> None:
-        self._env = None  # type: ignore[assignment]
+        self._engine = None
 
-    @property
-    def scores(self) -> np.ndarray:
-        return self._env.scores()
-
-    @property
-    def final_scores(self) -> np.ndarray:
-        return self._env.final_scores()
+    # ------------------------------------------------------------- internal
+    def _require_engine(self) -> VecSnake:
+        if self._engine is None:
+            raise RuntimeError("this SnakeVecEnv has been closed")
+        return self._engine
 
 
 @register(ENVS, "snake")
-def make_snake(cfg: EnvConfig, seed: int | None = None) -> SnakeVecEnv:
+def make_snake(cfg: EnvConfig, *, seed: int | None = None) -> SnakeVecEnv:
     return SnakeVecEnv(cfg, seed=seed)

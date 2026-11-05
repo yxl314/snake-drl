@@ -1,4 +1,6 @@
-"""Training orchestration: runner, evaluator, logger, callbacks, composition root."""
+"""Training orchestration: runner service, evaluation, logging, composition root."""
+
+from __future__ import annotations
 
 from .callbacks import (
     Callback,
@@ -8,16 +10,9 @@ from .callbacks import (
     LoggingCallback,
     ProgressCallback,
 )
-from .checkpoint import load_checkpoint, save_checkpoint
+from .checkpoint import load_checkpoint, prune_checkpoints, save_checkpoint
 from .evaluator import Evaluator
-from .factory import (
-    build_algorithm,
-    build_evaluator,
-    build_policy_for,
-    build_trainer,
-    load_policy,
-    policy_family,
-)
+from .factory import build_algorithm, build_evaluator, build_trainer, load_policy
 from .logger import MetricLogger
 from .trainer import Trainer
 
@@ -33,10 +28,9 @@ __all__ = [
     "Trainer",
     "build_algorithm",
     "build_evaluator",
-    "build_policy_for",
     "build_trainer",
     "load_checkpoint",
     "load_policy",
-    "policy_family",
+    "prune_checkpoints",
     "save_checkpoint",
 ]

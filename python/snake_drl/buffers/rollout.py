@@ -1,22 +1,21 @@
 """Pre-allocated on-policy rollout storage.
 
-The buffer owns every tensor it needs, so a collection step is a ``copy_`` into
-a slice and the update step works on flattened *views* -- no per-step allocation
-and no re-shuffle copies (minibatches are slices of one ``randperm``).
+The buffer owns every tensor it needs, so collecting a rollout is a sequence of
+``copy_`` into slices and the update works on flattened *views*: no per-step
+allocation and no shuffle copies (minibatches are slices of one ``randperm``).
 
 Memory is ``steps * num_envs * frames * frame_bytes`` for each of ``obs`` and
-``next_obs``; storing ``next_obs`` is what makes truncation bootstrapping exact.
+``next_obs``.  Storing ``next_obs`` is what makes truncation bootstrapping exact.
 """
 
 from __future__ import annotations
 
-from typing import Dict
-
 import torch
 
+from .._dtypes import torch_dtype
 from ..spaces import ObsSpec
 
-_TORCH_DTYPES = {"uint8": torch.uint8, "float32": torch.float32}
+__all__ = ["RolloutBuffer"]
 
 
 class RolloutBuffer:
@@ -28,15 +27,15 @@ class RolloutBuffer:
         frames: int,
         device: torch.device | str = "cpu",
     ) -> None:
-        if steps < 1 or num_envs < 1:
-            raise ValueError("steps and num_envs must be >= 1")
+        if steps < 1 or num_envs < 1 or frames < 1:
+            raise ValueError("steps, num_envs and frames must all be >= 1")
         self.steps = int(steps)
         self.num_envs = int(num_envs)
         self.frames = int(frames)
         self.device = torch.device(device)
-        dtype = _TORCH_DTYPES[obs_spec.dtype]
-        window = (self.frames, *obs_spec.shape)
 
+        window = (self.frames, *obs_spec.shape)
+        dtype = torch_dtype(obs_spec)
         self.obs = torch.empty((steps, num_envs, *window), dtype=dtype, device=self.device)
         self.next_obs = torch.empty_like(self.obs)
         self.actions = torch.empty((steps, num_envs), dtype=torch.int64, device=self.device)
@@ -48,6 +47,7 @@ class RolloutBuffer:
         self._cursor = 0
 
     def reset(self) -> None:
+        """Start a new rollout; the stored values are overwritten in order."""
         self._cursor = 0
 
     @property
@@ -65,6 +65,7 @@ class RolloutBuffer:
         terminated: torch.Tensor,
         truncated: torch.Tensor,
     ) -> None:
+        """Write one step for every environment."""
         t = self._cursor
         if t >= self.steps:
             raise RuntimeError(f"rollout buffer is full ({self.steps} steps); call reset()")
@@ -78,7 +79,7 @@ class RolloutBuffer:
         self.truncated[t].copy_(truncated)
         self._cursor = t + 1
 
-    def flat(self) -> Dict[str, torch.Tensor]:
+    def flat(self) -> dict[str, torch.Tensor]:
         """``(steps, num_envs, ...)`` -> ``(steps*num_envs, ...)`` views."""
         flat = self.steps * self.num_envs
         return {
@@ -91,18 +92,3 @@ class RolloutBuffer:
             "terminated": self.terminated.reshape(flat),
             "truncated": self.truncated.reshape(flat),
         }
-
-    def nbytes(self) -> int:
-        return sum(
-            t.numel() * t.element_size()
-            for t in (
-                self.obs,
-                self.next_obs,
-                self.actions,
-                self.rewards,
-                self.logprobs,
-                self.values,
-                self.terminated,
-                self.truncated,
-            )
-        )

@@ -12,6 +12,7 @@ observations and only pay for the float conversion where it is needed.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 import torch
 import torch.nn as nn
@@ -19,14 +20,27 @@ from torch import distributions as dist
 
 from ..spaces import ActionSpec, ObsSpec
 from .encoders import Encoder
+from .heads import ActorCriticHead, Head
+
+__all__ = ["ActionOutput", "ActorCriticPolicy", "GreedyPolicy", "QPolicy"]
 
 
 @dataclass
 class ActionOutput:
+    """Everything PPO needs to remember about one acting step."""
+
     action: torch.Tensor  # (B,) int64
     logprob: torch.Tensor  # (B,)
     value: torch.Tensor  # (B,)
     entropy: torch.Tensor  # (B,)
+
+
+class GreedyPolicy(Protocol):
+    """What the evaluator needs from a policy."""
+
+    frames: int
+
+    def greedy(self, obs: torch.Tensor) -> torch.Tensor: ...
 
 
 class _PolicyBase(nn.Module):
@@ -54,29 +68,32 @@ class _PolicyBase(nn.Module):
             x = x * self.obs_scale
         return x
 
+    def _features(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.encoder(self.prepare(obs))
+
 
 class ActorCriticPolicy(_PolicyBase):
     def __init__(
-        self, encoder: Encoder, head: nn.Module, spec: ObsSpec, action_spec: ActionSpec
+        self, encoder: Encoder, head: ActorCriticHead, spec: ObsSpec, action_spec: ActionSpec
     ) -> None:
         super().__init__(encoder, spec)
         self.head = head
         self.n_actions = action_spec.n
 
     def forward(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        logits, value = self.head(self.encoder(self.prepare(obs)))
+        logits, value = self.head(self._features(obs))
         return logits, value
 
     @torch.no_grad()
     def act(self, obs: torch.Tensor, deterministic: bool = False) -> ActionOutput:
         logits, value = self.forward(obs)
-        dist_ = dist.Categorical(logits=logits)
-        action = logits.argmax(dim=-1) if deterministic else dist_.sample()
+        distribution = dist.Categorical(logits=logits)
+        action = logits.argmax(dim=-1) if deterministic else distribution.sample()
         return ActionOutput(
             action=action,
-            logprob=dist_.log_prob(action),
+            logprob=distribution.log_prob(action),
             value=value,
-            entropy=dist_.entropy(),
+            entropy=distribution.entropy(),
         )
 
     @torch.no_grad()
@@ -86,30 +103,32 @@ class ActorCriticPolicy(_PolicyBase):
 
     @torch.no_grad()
     def value(self, obs: torch.Tensor) -> torch.Tensor:
-        logits, value = self.forward(obs)
-        return value
+        """State value only; skips the actor head (used for bootstrapping)."""
+        return self.head.value(self._features(obs))
 
     def evaluate_actions(
         self, obs: torch.Tensor, actions: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Log-probability, entropy and value of ``actions`` under this policy."""
         logits, value = self.forward(obs)
-        dist_ = dist.Categorical(logits=logits)
-        return dist_.log_prob(actions), dist_.entropy(), value
+        distribution = dist.Categorical(logits=logits)
+        return distribution.log_prob(actions), distribution.entropy(), value
 
 
 class QPolicy(_PolicyBase):
     def __init__(
-        self, encoder: Encoder, head: nn.Module, spec: ObsSpec, action_spec: ActionSpec
+        self, encoder: Encoder, head: Head, spec: ObsSpec, action_spec: ActionSpec
     ) -> None:
         super().__init__(encoder, spec)
         self.head = head
         self.n_actions = action_spec.n
 
     def forward(self, obs: torch.Tensor) -> torch.Tensor:
-        return self.head(self.encoder(self.prepare(obs)))
+        return self.head(self._features(obs))
 
     @torch.no_grad()
     def act(self, obs: torch.Tensor, epsilon: float = 0.0) -> torch.Tensor:
+        """Epsilon-greedy action; ``epsilon=0`` is the deterministic policy."""
         greedy = self.forward(obs).argmax(dim=-1)
         if epsilon <= 0.0:
             return greedy

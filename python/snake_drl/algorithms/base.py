@@ -3,58 +3,81 @@
 ``iterate()`` is the whole contract the trainer needs: it advances the
 environment, learns, and returns the metrics of that iteration.  PPO's iterate
 is "collect n_steps then run epochs"; DQN's is "collect one vectorized step then
-run gradient_steps updates".  Everything else (logging, evaluation, checkpointing)
-is a callback and stays algorithm-agnostic.
+run the credited gradient steps".  Everything else -- logging, evaluation,
+checkpointing -- is a callback and stays algorithm-agnostic.
+
+Subclasses implement ``_iterate()``; ``iterate()`` is final-ish and only keeps
+the iteration counter, so the trainer can rely on it.
+
+Counters have one meaning each:
+
+* ``env_steps`` -- environment steps (transitions) collected;
+* ``updates`` -- optimizer steps taken (PPO: minibatches, DQN: gradient steps);
+* ``iterations`` -- calls to :meth:`iterate`.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
 
 import torch
 import torch.nn as nn
 
 from ..runner import VectorRunner
 
+__all__ = ["Algorithm"]
+
 
 class Algorithm(ABC):
-    def __init__(self, policy: nn.Module, runner: VectorRunner, device: torch.device) -> None:
+    def __init__(
+        self,
+        policy: nn.Module,
+        runner: VectorRunner,
+        device: torch.device,
+        *,
+        total_steps: int | None = None,
+    ) -> None:
         self.policy = policy
         self.runner = runner
-        self.device = device
+        self.device = torch.device(device)
         self.env_steps = 0
         self.updates = 0
-        self.total_steps: int | None = None  # set by the factory for schedules
+        self.iterations = 0
+        # The run horizon drives learning-rate schedules.  The factory fills it
+        # from the config; the trainer asserts that both agree.
+        self.total_steps = total_steps
 
     # ------------------------------------------------------------------ core
-    @abstractmethod
-    def iterate(self) -> Dict[str, float]:
+    def iterate(self) -> dict[str, float]:
         """One collect + learn cycle."""
+        metrics = self._iterate()
+        self.iterations += 1
+        return metrics
+
+    @abstractmethod
+    def _iterate(self) -> dict[str, float]:
+        """Implementation of :meth:`iterate`; subclasses override this."""
 
     # ------------------------------------------------------------ lifecycle
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, object]:
         return {
             "policy": self.policy.state_dict(),
             "env_steps": self.env_steps,
             "updates": self.updates,
+            "iterations": self.iterations,
         }
 
-    def load_state_dict(self, state: Dict[str, Any]) -> None:
-        self.policy.load_state_dict(state["policy"])
+    def load_state_dict(self, state: dict[str, object]) -> None:
+        self.policy.load_state_dict(state["policy"])  # type: ignore[arg-type]
         self.env_steps = int(state.get("env_steps", 0))
         self.updates = int(state.get("updates", 0))
-
-    @property
-    def n_actions(self) -> int:
-        return self.runner.action_spec.n
-
-    @property
-    def frames(self) -> int:
-        return self.runner.frames
+        self.iterations = int(state.get("iterations", 0))
 
     def close(self) -> None:
         self.runner.close()
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}(policy={type(self.policy).__name__}, env_steps={self.env_steps})"
+        return (
+            f"{type(self).__name__}(policy={type(self.policy).__name__}, "
+            f"env_steps={self.env_steps}, updates={self.updates})"
+        )

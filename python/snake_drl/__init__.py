@@ -1,33 +1,45 @@
 """snake-drl: batched snake engine, human play mode and a modular DRL layer.
 
-The core engine is imported eagerly (it is the reason the package exists); the
-training layer -- and therefore torch -- is imported lazily so ``snake-play``
+The engine is imported eagerly (it is the reason the package exists); the
+training layer -- and therefore torch -- is imported lazily, so ``snake-play``
 starts without paying for it.
+
+Public API::
+
+    from snake_drl import Trainer, build_trainer, load_config
+    from snake_drl import ENCODERS, BUFFERS, ENVS      # extension points
 """
+
+from __future__ import annotations
 
 from ._snake_core import AutoresetMode, ObsMode, VecConfig, VecSnake
 
 __version__ = "1.1.0"
 
 __all__ = [
+    # engine
     "AutoresetMode",
     "ObsMode",
     "VecConfig",
     "VecSnake",
     "__version__",
+    # spaces
     "ActionSpec",
+    "ObsSpec",
+    # configuration
+    "ProjectConfig",
+    "load_config",
+    # training
+    "Evaluator",
+    "Trainer",
+    "build_trainer",
+    "load_policy",
+    # environment helpers
+    "make_env",
+    # extension points
     "BUFFERS",
     "ENCODERS",
     "ENVS",
-    "Evaluator",
-    "ObsSpec",
-    "ProjectConfig",
-    "Trainer",
-    "build_policy",
-    "build_trainer",
-    "load_config",
-    "load_policy",
-    "make_env",
 ]
 
 _LAZY = {
@@ -39,7 +51,6 @@ _LAZY = {
     "Evaluator": ("snake_drl.trainer", "Evaluator"),
     "ProjectConfig": ("snake_drl.config", "ProjectConfig"),
     "Trainer": ("snake_drl.trainer", "Trainer"),
-    "build_policy": ("snake_drl.nn", "build_policy"),
     "build_trainer": ("snake_drl.trainer", "build_trainer"),
     "load_config": ("snake_drl.config", "load"),
     "load_policy": ("snake_drl.trainer", "load_policy"),
@@ -59,5 +70,5 @@ def __getattr__(name: str):
     return value
 
 
-def __dir__():
+def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_LAZY))

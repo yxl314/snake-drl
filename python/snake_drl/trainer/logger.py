@@ -10,7 +10,8 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Dict
+
+__all__ = ["MetricLogger"]
 
 
 class MetricLogger:
@@ -36,7 +37,7 @@ class MetricLogger:
                 print("tensorboard is not installed; continuing without it", file=sys.stderr)
         self._last = time.time()
 
-    def log(self, step: int, metrics: Dict[str, float]) -> None:
+    def log(self, step: int, metrics: dict[str, float]) -> None:
         record = {"step": int(step), **{k: float(v) for k, v in metrics.items()}}
         self._file.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._file.flush()
@@ -56,7 +57,7 @@ class MetricLogger:
         if self._tb is not None:
             self._tb.close()
 
-    def __enter__(self) -> "MetricLogger":
+    def __enter__(self) -> MetricLogger:
         return self
 
     def __exit__(self, *exc_info: object) -> None:

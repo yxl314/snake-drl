@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import torch
 
+__all__ = ["compute_gae"]
+
 
 def compute_gae(
     rewards: torch.Tensor,
@@ -20,6 +22,7 @@ def compute_gae(
     one (the caller handles that).  ``terminated`` cuts the trace; ``truncated``
     must not be in this mask, otherwise the bootstrap is silently dropped.
     """
+
     steps = rewards.shape[0]
     advantages = torch.zeros_like(rewards)
     last = torch.zeros_like(rewards[0])

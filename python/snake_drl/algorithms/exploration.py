@@ -7,8 +7,10 @@ passes :class:`LinearSchedule`.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+
+__all__ = ["BetaFn", "Constant", "EpsilonFn", "LinearSchedule"]
 
 EpsilonFn = Callable[[int], float]
 BetaFn = Callable[[int], float]

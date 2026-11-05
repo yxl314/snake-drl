@@ -1,15 +1,17 @@
 """A tiny name -> factory registry.
 
 Components (encoders, buffers, algorithms, environments) register themselves
-here so a YAML file can name them.  Factories are plain callables taking
-keyword arguments; nothing is instantiated implicitly, which keeps the wiring
-explicit and testable (no ``_target_`` magic, no global state beyond the
-registry itself).
+here so a YAML file can name them.  Factories are plain callables taking keyword
+arguments; nothing is instantiated implicitly, which keeps the wiring explicit
+and testable (no ``_target_`` magic, no global state beyond the registry itself).
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Generic, Iterator, TypeVar
+from collections.abc import Callable, Iterator
+from typing import Any, Generic, TypeVar
+
+__all__ = ["Registry", "register"]
 
 T = TypeVar("T")
 
@@ -17,10 +19,10 @@ T = TypeVar("T")
 class Registry(Generic[T]):
     def __init__(self, name: str) -> None:
         self.name = name
-        self._items: Dict[str, T] = {}
+        self._items: dict[str, T] = {}
 
     def register(self, key: str, item: T | None = None) -> Any:
-        """Use directly (``reg.register("x", fn)``) or as a decorator."""
+        """Register ``item`` under ``key``; usable directly or as a decorator."""
 
         def _decorator(obj: T) -> T:
             if key in self._items:
