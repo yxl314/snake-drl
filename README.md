@@ -16,19 +16,22 @@ A batched snake engine written in C++, plus a modular deep-RL layer on top of it
 core/                 C++ engine (framework-agnostic, no CUDA)
 bindings/python/      pybind11 bindings -> _snake_core
 python/snake_drl/     engine re-export, DRL layer and play mode
-  spaces.py           ObsSpec / ActionSpec / StepBatch
+  spaces.py           ObsSpec / ActionSpec (torch-free)
   registry.py         name -> factory registry
+  _dtypes.py          the single ObsSpec.dtype -> numpy/torch mapping
   config.py           typed configs + YAML loading
   envs/               VectorEnv, snake adapter, toy MDPs
-  nn/                 encoders, heads, policies, FastLinear
-  buffers/            rollout buffer, uniform replay, prioritized replay
+  nn/                 heads, policies, FastLinear
+    encoders/         mlp, cnn, gru, transformer, convgru, convtransformer
+                      (one module per architecture + registry + base)
+  buffers/            batch container, protocols, rollout, uniform/prioritized replay
   algorithms/         PPO, DQN family, GAE, schedules
-  runner.py           the only component that talks to an environment
+  runner.py           the only component that talks to an environment; StepBatch
   trainer/            trainer loop, evaluator, logger, checkpoints, factory
   cli.py              `snake-drl train|eval|play|bench`
 configs/              example YAML configs
 docs/                 design document (Chinese) with benchmark data
-tests/                pytest suite (CPU, seconds)
+tests/                pytest suite (CPU, ~2 min)
 ```
 
 ## Build
@@ -58,8 +61,8 @@ Outputs land in `runs/<name>-<timestamp>/`: `config.yaml`, `metrics.jsonl`,
 `checkpoint_*.pt` and `latest.pt`.
 
 ```bash
-# evaluate a checkpoint (greedy policy, fresh environments)
-snake-drl eval -m runs/d3qn_cnn-*/latest.pt --episodes 50
+# evaluate a checkpoint; --set overrides its own config (never the weights)
+snake-drl eval -m runs/d3qn_cnn-*/latest.pt --episodes 50 --set env.num_envs=8
 
 # measure engine + policy throughput for your machine
 snake-drl bench -c configs/d3qn_cnn.yaml
@@ -134,16 +137,19 @@ Measured on an 8-vCPU aarch64 box (details in the design document):
 - DQN updates are counted in *transitions* (`train_freq`), not vectorized steps,
   so the update rate does not silently shrink when `num_envs` grows.
 
-## Tests
+## Tests and code quality
 
 ```bash
-pytest -q
+pytest -q                                    # 69 tests, CPU, ~2 min
+ruff check python/snake_drl tests            # E,F,W,I,UP,B,SIM
+ruff format --check python/snake_drl tests --exclude python/snake_drl/play
 ```
 
-Covers config validation, all six encoders, policy/head math, buffer wraparound,
-prioritized-sampling correctness, GAE against a naive reference, DQN/DDQN/D3QN
-targets, terminal/truncation handling, the runner window contract, checkpoint
-round-trips and short learning runs on toy MDPs.
+Covers config validation (strict unknown-key rejection, override precedence), all
+six encoders, policy/head math, buffer wraparound, prioritized-sampling
+correctness, GAE against a naive reference, DQN/DDQN/D3QN targets, terminal vs
+truncation handling, the runner window contract, algorithm counters, checkpoint
+round-trips, evaluation overrides and short learning runs on toy MDPs.
 
 ## C++ engine quality gates
 

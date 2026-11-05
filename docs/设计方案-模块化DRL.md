@@ -137,10 +137,14 @@ engine.step(int8 actions)                     C++，释放 GIL
 四件套：**协议 + 注册表 + 配置类 + 工厂**。
 
 ```python
-ENCODERS  = Registry("encoder")        # mlp/cnn/gru/transformer/convgru/convtransformer
-BUFFERS   = Registry("replay buffer")  # uniform/prioritized
-ENVS      = Registry("environment")    # snake/bandit/corridor
+# 每个层把注册表放在独立的 registry.py，避免"实现模块 -> 包 __init__ -> 实现模块"的环
+from snake_drl.nn.encoders.registry import ENCODERS   # mlp/cnn/gru/transformer/convgru/convtransformer
+from snake_drl.buffers.registry import BUFFERS        # uniform/prioritized
+from snake_drl.envs.registry import ENVS              # snake/bandit/corridor
 ```
+
+编码器实现拆成 `nn/encoders/{mlp,cnn,gru,transformer,convgru,convtransformer}.py`，
+每个文件只依赖 `Encoder` 基类、注册表和 `FastLinear`；新增一种网络不需要改任何既有文件。
 
 装配根 `trainer/factory.py` 是唯一知道"谁和谁怎么接"的地方：
 
@@ -169,6 +173,12 @@ algo    = PPO(cfg.algorithm, policy, runner, buffer, optimizer, device)
 - `BanditEnv` / `CorridorEnv`：确定性玩具 MDP，用于单测和算法正确性验证；
   两者都实现与引擎一致的 autoreset 语义。
 - 动作模式：默认相对动作（直行/右转/左转，3 个），可选绝对方向（4 个）。
+- **统一的工厂签名**：所有环境都是 `factory(cfg: EnvConfig, *, seed: int | None)`，
+  由 `ENVS.create(cfg.type, cfg=cfg, seed=seed)` 调用；不存在 snake 与玩具环境的特殊分支。
+  玩具环境的额外参数走 `env.kwargs`（`length`/`n_ctx`），`max_episode_steps` 与其他环境一样
+  取自顶层字段——早期版本里玩具环境忽略这个字段，导致"永不结束的评估"。
+- `SnakeVecEnv.close()` 可重复调用，关闭后再用会抛出明确的 `RuntimeError`，而不是
+  `AttributeError: 'NoneType'`。
 
 ---
 
@@ -264,6 +274,7 @@ Q = V + A - mean(A)                                  # dueling head
 
 - 目标网络：`tau == 1` 时每 `target_update` 个环境步硬同步；`tau < 1` 时每步软更新。
 - 截断：`terminated=False` 时照常 bootstrap，使用 `next_obs`（终局帧）。
+- 梯度裁剪：`max_grad_norm <= 0` 关闭（不再有独立的 `grad_clip` 布尔开关，避免两套语义）。
 - 更新频率：`train_freq` 以**转移数**计。一个向量步收集 `num_envs` 条转移，
   攒够 `train_freq` 条做 `gradient_steps` 次更新；`learning_starts` 之前不学习，
   同时限制"欠账"上限，避免开训瞬间突发。
@@ -362,7 +373,12 @@ PER：采样 256 条 67 µs、更新 256 个优先级 40 µs，相对一次 DQN 
 7. CUDA 下 pinned staging + `non_blocking=True`；小标量也走 pinned，
    避免每步同步把流水线打断。
 8. 线性层走 `FastLinear`；`SNAKE_DRL_LINEAR=addmm` 可关闭。
-9. 不默认开 `torch.compile` / AMP：前者首次编译开销大且 aarch64 稳定性未知，
+9. 普通 DQN 不再计算 online 网络的 next-state Q（DDQN 才需要），省掉一次整批前向；
+   PPO 的自举只走 `head.value`，不计算 actor 头。
+10. 回放只 pin 采样输出、不 pin 整块存储（100k 转移的 pinned 池会把显存/锁页内存吃光）；
+    `buffer.device=cpu` 时 `ReplayBatch.to(device)` 负责异步搬移。
+11. checkpoint 的 `latest.pt` 用 `shutil.copyfile` 流式复制，不再把整个文件读进内存两次。
+12. 不默认开 `torch.compile` / AMP：前者首次编译开销大且 aarch64 稳定性未知，
    后者只对 CUDA 有意义；都通过配置留作扩展。
 10. T=1 的窗口用双缓冲（`_frame` / `_frame_alt`）交换，避免向
     `(B,1,C,H,W)` 的跨步切片写入；T>1 才做整窗平移。
@@ -383,12 +399,14 @@ PER：采样 256 条 67 µs、更新 256 个优先级 40 µs，相对一次 DQN 
 
 ```bash
 snake-drl train -c configs/d3qn_cnn.yaml --set algorithm.lr=1e-4
-snake-drl eval  -m runs/<run>/latest.pt --episodes 50
+snake-drl eval  -m runs/<run>/latest.pt --episodes 50 --set env.num_envs=8
 snake-drl bench -c configs/dqn_mlp.yaml
 snake-play
 ```
 
-命令行覆盖支持 `key.path=value`，类型由 OmegaConf 解析。
+命令行覆盖支持 `key.path=value`，类型由 OmegaConf 解析。`eval` 的覆盖**作用在
+checkpoint 自带的配置之上**（不是另找一份配置），因此不会出现"配置与权重形状不一致"
+的隐患；`eval` 不再接受单独的 `-c`（那会重新定义网络结构）。
 
 ---
 
@@ -406,7 +424,15 @@ snake-play
 | `test_env.py` | snake 规格、死亡惩罚、截断、玩具环境语义 |
 | `test_runner.py` | 窗口正确性、终止帧 `next_obs`、新 episode 复位、向量观测 |
 | `test_algorithms.py` | DQN/DDQN 目标、截断 bootstrap、GAE vs 朴素实现、PER 回写、四算法在老虎机上收敛 |
-| `test_trainer.py` | 端到端训练、指标/评估/checkpoint 文件、断点恢复、步数上限 |
+| `test_trainer.py` | 端到端训练、指标/评估/checkpoint 文件、断点恢复、步数上限、total_steps 一致性、eval 覆盖优先级 |
+
+共 69 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
+
+```bash
+pytest -q
+ruff check python/snake_drl tests
+ruff format --check python/snake_drl tests --exclude python/snake_drl/play
+```
 
 ---
 
@@ -474,3 +500,72 @@ snake-drl train -c configs/dqn_mlp.yaml --set algorithm.type=d3qn \
 
 snake-drl eval -m runs/<run>/latest.pt --episodes 20
 ```
+
+---
+
+## 17. 代码质量修订（v2.1）
+
+在不改变行为的前提下（69 个测试全绿）按六个维度做了一次系统性审查与重构。
+
+### 17.1 模块化设计
+
+- `nn/encoders.py`（338 行、6 个类）拆成 `nn/encoders/` 包：`base.py` + 每种网络一个
+  文件 + `registry.py`。新增一种网络不需要修改任何既有文件。
+- 三个注册表各自独立成 `registry.py`（`nn/encoders/registry.py`、`buffers/registry.py`、
+  `envs/registry.py`），从结构上消除"实现模块 → 包 `__init__` → 实现模块"的循环导入。
+- `buffers/base.py` 拆成 `batch.py`（数据容器）/ `protocols.py`（算法依赖的协议）/ `registry.py`。
+- 算法共用的优化器步骤抽到 `algorithms/optim.py`，两处重复的
+  `zero_grad/backward/clip/step` 收敛为一处。
+- `StepBatch` 从 `spaces.py` 移到 `runner.py`：它携带 `torch.Tensor`，而 `spaces` 要
+  保持框架无关（envs 层至今没有一行 `import torch`）。
+
+### 17.2 可读性与可维护性
+
+- 公共类/函数全部有 docstring，实现细节一律 `_` 前缀。
+- 魔法数字命名：`_MAX_BANKED_TRIGGERS`、`_STAT_KEYS`、`_TEMPORAL`、`_ALL`。
+- PPO 约 90 行的 `_update` 拆成 `_advantages` / `_run_epochs` / `_value_loss`，
+  DQN 的 `_iterate` 拆出 `_credit_updates`。
+- 类型标注现代化：`list[int]`、`X | None`、`collections.abc.Callable`。
+- `ruff`（`E,F,W,I,UP,B,SIM`）与 `ruff format` 全绿，规则写进 `pyproject.toml`。
+
+### 17.3 底层屏蔽
+
+- `SnakeVecEnv` 的引擎句柄私有化（`_engine` + `_require_engine()`），关闭后再用会得到
+  `RuntimeError: this SnakeVecEnv has been closed`，而不是 `AttributeError: 'NoneType'`；
+  `close()` 可重复调用。
+- 回放的存储张量、采样输出缓冲、sum tree 全部私有，对外只有
+  `add / sample / update_priorities / __len__`。
+- 顶层 `snake_drl` 只导出 17 个名字（引擎 + 配置 + 训练入口 + 三个注册表），
+  `build_policy` 之类的装配细节留在 `snake_drl.nn`。
+
+### 17.4 语义一致性
+
+- **`updates` 统一为"优化器步数"**：此前 PPO 每次 `iterate` 记 1、DQN 每个梯度步记 1，
+  两个数字不可比。现在两者都按优化器步计，另加 `iterations` 表示 `iterate()` 调用次数；
+  checkpoint 同时保存两者。
+- **`total_steps` 单一来源**：`Trainer` 负责写入并校验 `algorithm.total_steps`，
+  与算法构造时的值不一致直接报错（学习率调度不再可能静默失效）。
+- **环境工厂签名统一**：全部是 `factory(cfg, *, seed=None)`；玩具环境的
+  `max_episode_steps` 与引擎环境语义一致（早期版本会让评估永不结束）。
+- 删除 `grad_clip`：它和 `max_grad_norm <= 0` 是同一个开关的两种写法，配置里只保留一种。
+  迁移：v2.1 之前保存的 checkpoint 的 config 里含该字段，严格解析会拒绝；重新训练即可
+  （旧 checkpoint 仅存在于本地实验目录，未随仓库分发）。
+- `eval` 的 `--set` 覆盖作用在 **checkpoint 自带配置** 之上，不再接受会重新定义网络结构的 `-c`。
+
+### 17.5 最小暴露
+
+删除以下未被使用或已经过时的公开面：`TOY_ENVS`、`parse_override`、`make_rng`、
+`Runtime.is_cuda`、`ObsSpec.windowed`、`RolloutProtocol`、两个缓冲区上的 `nbytes`、
+`Algorithm.n_actions` / `Algorithm.frames`、`buffers/base.py`、`DQN._last_metrics`。
+
+### 17.6 性能隐患
+
+- 普通 DQN 不再计算 online 网络的 next-state Q：只有 DDQN/D3QN 需要它。
+  同机同负载下 `_update` 从 36.6 ms 降到 18.7 ms（省掉一次整批前向）。
+- PPO 自举只走 `ActorCriticHead.value`，不再顺带计算 actor 头。
+- 回放只 pin 采样输出，不 pin 整块存储：100k 转移的 pinned 池会耗尽锁页内存，
+  而异步拷贝只要求源张量是 pinned。
+- `ReplayBatch.to(device)` 统一设备语义：修复了 `buffer.device=cpu` + GPU 训练时
+  直接把 CPU 张量喂给 GPU 网络的问题。
+- checkpoint 的 `latest.pt` 改为 `shutil.copyfile` 流式复制，不再把整个文件读入内存两次。
+- 指标继续"一次 iterate 一次同步"；PPO 的统计量改为一次 `stack` + 一次 `tolist()`。
