@@ -21,7 +21,7 @@ from ..algorithms.dqn import DQN
 from ..algorithms.exploration import LinearSchedule
 from ..algorithms.ppo import PPO
 from ..buffers import RolloutBuffer, build_replay
-from ..config import DQNConfig, PPOConfig, ProjectConfig, RunConfig, to_dict
+from ..config import DQNConfig, PPOConfig, ProjectConfig, to_dict
 from ..device import Runtime, configure_runtime, resolve_device
 from ..envs import VectorEnv, make_env
 from ..nn.build import build_policy

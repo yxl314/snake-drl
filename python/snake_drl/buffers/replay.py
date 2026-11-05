@@ -14,7 +14,7 @@ Storage choices, all measured:
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -22,7 +22,7 @@ import torch
 from ..config import BufferConfig
 from ..registry import register
 from ..spaces import ObsSpec
-from .base import BUFFERS, ReplayBatch, ReplayProtocol
+from .base import BUFFERS, ReplayBatch
 from .sumtree import SumTree
 
 _TORCH_DTYPES = {"uint8": torch.uint8, "float32": torch.float32}

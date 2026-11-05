@@ -4,7 +4,6 @@ concrete network, which keeps the algorithms free of ``if encoder == ...``."""
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn

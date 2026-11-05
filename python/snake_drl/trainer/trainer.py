@@ -7,7 +7,7 @@ checkpoints) lives in a callback.
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence
+from typing import List, Sequence
 
 from ..algorithms.base import Algorithm
 from .callbacks import Callback

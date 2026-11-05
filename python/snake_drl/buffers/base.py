@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol, Tuple
+from typing import Callable, Protocol
 
 import torch
 

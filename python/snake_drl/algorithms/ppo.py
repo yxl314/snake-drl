@@ -32,6 +32,7 @@ class PPO(Algorithm):
         self._mb_obs = torch.empty(
             (self._minibatch, *buffer.obs.shape[2:]), dtype=buffer.obs.dtype, device=device
         )
+        self._obs: torch.Tensor | None = None
 
     # ------------------------------------------------------------------ core
     def iterate(self) -> Dict[str, float]:
@@ -39,7 +40,9 @@ class PPO(Algorithm):
         self.buffer.reset()
         self.policy.eval()
         with torch.no_grad():
-            obs = self.runner.reset()
+            # Continue the running episodes: resetting every rollout would cut
+            # each episode at n_steps and throw away the agents' progress.
+            obs = self._obs if self._obs is not None else self.runner.reset()
             for _ in range(self.cfg.n_steps):
                 out = self.policy.act(obs)
                 step = self.runner.step(out.action)
@@ -55,6 +58,7 @@ class PPO(Algorithm):
                 )
                 obs = self.runner.obs
             last_next = step.next_obs
+        self._obs = obs
         self.env_steps += num_envs * self.cfg.n_steps
         self.policy.train()
         return self._update(last_next)

@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from pathlib import Path
 from typing import List, Optional
 
 import torch
@@ -85,7 +84,6 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 
 def cmd_eval(args: argparse.Namespace) -> int:
-    from .config import from_dict
     from .trainer import build_evaluator, load_policy
 
     device = resolve_device(args.device or "auto")
