@@ -52,9 +52,7 @@ def test_gae_matches_naive_reference():
     truncated = (torch.rand(steps, envs) > 0.85) & ~terminated
     done = terminated | truncated
 
-    adv, ret = compute_gae(
-        rewards, values, next_values, terminated, truncated, 0.99, 0.95
-    )
+    adv, ret = compute_gae(rewards, values, next_values, terminated, truncated, 0.99, 0.95)
 
     reference = np.zeros((steps, envs))
     last = np.zeros(envs)
