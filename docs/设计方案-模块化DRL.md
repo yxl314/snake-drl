@@ -242,6 +242,9 @@ algo    = PPO(cfg.algorithm, policy, runner, buffer, optimizer, device)
 forward 改成 `x @ W.T + b`。最大数值差异 1.2e-6。`SNAKE_DRL_LINEAR=addmm`
 可回退。Conv2d 不受影响（走 conv 路径）。
 
+它同时用于编码器**和输出头**：头层的 `(256,256)×(256,3)` 是同一个 `addmm` 热点，
+实测 PPO 的 `act` 降低约 15%、DQN 单次梯度步降低约 18%。
+
 ---
 
 ## 8. 算法层
@@ -252,6 +255,10 @@ forward 改成 `x @ W.T + b`。最大数值差异 1.2e-6。`SNAKE_DRL_LINEAR=add
 - GAE：`δ = r + γ·V(s')·(1-terminated) - V(s)`；`s'` 对截断步取终局帧的 V，
   由 `v_next[truncated] = policy.value(next_obs[truncated])` 单独计算
   （只对截断子集做一次前向，不用为所有步重算）。
+- GAE 的两类掩码不能混用：`terminated` 只用来抑制 `δ` 里的自举；递推的截断用
+  `terminated | truncated`。截断步本身仍自举，但它之后的 transition 属于新回合
+  （autoreset），若让它流入前一步的 advantage，就会把下一回合的回报借过来。
+- advantage 标准化用 `std(unbiased=False)`：单样本 rollout 的标准差是 0 而不是 NaN。
 - 更新：`epochs × minibatches`，advantage 标准化、ratio clip、可选 value clip、
   熵奖励、梯度裁剪、可选线性学习率、可选 `target_kl` 提前停止。
 - 指标累积在设备张量里，一次 iterate 只同步一次。
@@ -273,7 +280,8 @@ bootstrap = max_a Q_target(s')                      # DQN
 Q = V + A - mean(A)                                  # dueling head
 ```
 
-- 目标网络：`tau == 1` 时每 `target_update` 个环境步硬同步；`tau < 1` 时每步软更新。
+- 目标网络：`tau == 1` 时每 `target_update` 个环境步硬同步；`tau < 1` 时**每个梯度步**做一次
+  Polyak 平均（不是每个采集周期——`train_freq=4` 时两者差 4 倍）。
 - 截断：`terminated=False` 时照常 bootstrap，使用 `next_obs`（终局帧）。
 - 梯度裁剪：`max_grad_norm <= 0` 关闭（不再有独立的 `grad_clip` 布尔开关，避免两套语义）。
 - 更新频率：`train_freq` 以**转移数**计。一个向量步收集 `num_envs` 条转移，
@@ -322,7 +330,9 @@ Q = V + A - mean(A)                                  # dueling head
 - `Trainer`：`while env_steps < total_steps: metrics = algorithm.iterate()`，
   然后依次触发回调。不包含任何算法分支。
 - `Evaluator`：独立环境实例、贪心策略、统计 episode 回报/长度；
-  不依赖环境是否暴露 score，因此对任意环境通用。
+  不依赖环境是否暴露 score，因此对任意环境通用。`train.eval_max_steps` 按**每个环境**
+  计步（不是整批总和），否则 16 个并行评估环境 × 2000 步的回合永远跑不完；
+  一个回合都没完成时会发 `RuntimeWarning` 并返回 NaN，而不是静默给出空结果。
 - `MetricLogger`：JSONL + 控制台，可选 TensorBoard（惰性 import）。
 - `CheckpointCallback`：`config + algorithm.state_dict() + counters`，
   `torch.load(map_location=...)` 跨设备恢复；`latest.pt` 始终指向最后一次。
@@ -341,6 +351,7 @@ Q = V + A - mean(A)                                  # dueling head
 | 位棋盘解码 | 285 µs（+拷贝 426 µs） | 比直接拷 grid 慢 11–16×，弃用 |
 | 窗口平移（256 envs, T=4, 4 线程） | ~20 µs，原地 `copy_` | 预分配 + 原地平移，不做 `cat` 分配 |
 | 单帧窗口（T=1） | 双缓冲交换后 `runner.step` 4.84 ms → **0.775 ms** | 不为 `(B,1,C,H,W)` 做跨步写 |
+| CPU 采集拷贝 | torch `copy_` **2.07 ms** vs numpy `copyto` **0.094 ms**（76 KiB，紧随引擎并行段） | CPU 路径改用 numpy 赋值；与 torch 线程数解耦 |
 | 视图创建 | 1.8 µs | 每次 step 的 Python 开销可接受 |
 
 端到端（env step + 采集 + 256 批 CNN 前向）：
@@ -405,9 +416,18 @@ snake-drl bench -c configs/dqn_mlp.yaml
 snake-play
 ```
 
-命令行覆盖支持 `key.path=value`，类型由 OmegaConf 解析。`eval` 的覆盖**作用在
-checkpoint 自带的配置之上**（不是另找一份配置），因此不会出现"配置与权重形状不一致"
-的隐患；`eval` 不再接受单独的 `-c`（那会重新定义网络结构）。
+命令行覆盖支持 `key.path=value`，类型由 OmegaConf 解析；缺少 `=` 会直接报错
+（而不是把 `None` 送进类型转换）。字符串布尔按严格规则解析（`"false"` 是 False，
+`bool("false")` 是 True 这个坑不会再出现）。
+
+配置只校验**字段的形状**，不校验"有哪些实现"：`network.encoder.type` / `buffer.type`
+的合法名字由各自的注册表决定，因此用户注册的自定义编码器/回放在 YAML 里可以直接写。
+蛇特有的校验（棋盘尺寸、`obs_mode`、`action_mode`）放在 `SnakeVecEnv` 里，自定义环境
+不会被这些规则误伤。
+
+`eval` 的覆盖**作用在 checkpoint 自带的配置之上**（不是另找一份配置）；结构性覆盖
+（`network.*`、`env.width/height`）会让权重与配置对不上，此时会给出明确错误而不是
+torch 的 `size mismatch` 堆栈。`eval` 不再接受单独的 `-c`（那会重新定义网络结构）。
 
 ---
 
@@ -427,7 +447,7 @@ checkpoint 自带的配置之上**（不是另找一份配置），因此不会�
 | `test_algorithms.py` | DQN/DDQN 目标、截断 bootstrap、GAE vs 朴素实现、PER 回写、四算法在老虎机上收敛 |
 | `test_trainer.py` | 端到端训练、指标/评估/checkpoint 文件、断点恢复、步数上限、total_steps 一致性、eval 覆盖优先级 |
 
-共 70 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
+共 85 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
 
 ```bash
 pytest -q
@@ -459,6 +479,9 @@ ruff format --check python/snake_drl tests --exclude python/snake_drl/play
    但未在本机做 GPU 基准；`snake-drl bench` 可在目标机器上复测。
 6. snake 的观测是 body/head/food 三个平面，朝向可由蛇头与相邻身体格推断；
    若需要显式方向通道，可通过环境包装器扩展（不影响算法层）。
+7. checkpoint 保存策略/目标网络/优化器/计数器，**不保存回放内容**（100k 转移约 150 MiB）；
+   恢复后从空回放继续。恢复是库级能力（`load_state_dict`），CLI 没有 `--resume`——
+   需要时用同一个 config 重建算法再加载即可；评估走 `load_policy`。
 
 
 ---
@@ -585,3 +608,60 @@ snake-drl eval -m runs/<run>/latest.pt --episodes 20
   `optimizer_step` 的文档也写明"必须可重复迭代"；新增的回归测试用 spy 统计每次裁剪的
   参数个数，旧实现会在第二次之后出现 0。
 - 训练最后一步重复评估/重复写 checkpoint（已由 §17.6 的末步记录去掉）。
+
+### 17.8 第二轮审查（Python 端）
+
+这一轮只修"有真实场景"的问题，未引入任何新抽象：
+
+- **`epochs: 0` 直接崩溃**（`torch.stack` 不接受空列表）。一个不跑 epoch 的 PPO 没有意义，
+  改为配置校验 `epochs >= 1`，而不是在算法里加空列表分支。
+- **评估预算按整批计步导致"越好越评不出来"**：`eval_max_steps` 原意是总步数，
+  16 个评估环境 × 2000 步回合时只跑了 312 步/环境，一个回合都完不成，返回 NaN。
+  现在按**每个环境**计步，并在零回合完成时发出 `RuntimeWarning`。
+- **metrics.jsonl 里写 NaN 不是合法 JSON**：严格解析器（如带 `parse_constant` 的 json、
+  部分日志工具）会拒绝。非有限值改写为 `null`。
+- **`network.head` 与算法可能矛盾且被静默忽略**：`head: dueling_q` + `algorithm.type: dqn`
+  实际建的是非 dueling 网络。现在直接报错并提示改用 `d3qn` / `dueling: true`。
+- **软目标网络的更新频率错了**：`tau < 1` 原本每个采集周期更新一次，`train_freq=4`
+  时比"每个梯度步更新"慢 4 倍。现在在每次梯度步后做 Polyak 平均。
+- **同一秒启动的两个 run 会共用一个输出目录**（并行扫参时真实存在）：目录名冲突时
+  自动加后缀，且用 `mkdir(exist_ok=False)` 做到跨进程无竞争。
+- 删除两处没有调用方的"扩展钩子"：`save_checkpoint(extra=...)`、`SumTree.capacity`。
+
+
+### 17.9 第三轮：多视角评审（算法 / 数据路径 / API / 性能）
+
+四个并行评审各自给出证据，逐条取舍如下。
+
+**采纳（有真实场景且能复现）**
+
+| 问题 | 场景 | 修复 |
+|---|---|---|
+| GAE 在截断步没有切断递推 | 任一有回合上限的环境，截断时把下一回合的回报借给前一步（实测单步 advantage 偏 0.67） | `compute_gae` 增加 `truncated` 参数，递推用 `terminated\|truncated`，`δ` 仍用 `terminated` |
+| `adv.std()` 在单样本 rollout 上是 NaN | `num_envs=1, n_steps=1` 的冒烟配置，第一次更新就把全部权重写成 NaN | 改为 `std(unbiased=False)` |
+| 配置白名单挡住了自定义组件 | 注册 `my_encoder` 后写进 YAML 直接被配置层拒绝，与 README 的扩展说明矛盾 | 删除硬编码白名单，由注册表给出"可用名字"错误 |
+| `network.head` 与算法矛盾时被静默忽略 | `head: dueling_q` + `type: dqn` 实际建的是非 dueling 网络 | 直接报错并提示用 `d3qn` / `dueling: true` |
+| DQN 就绪门槛不可达时静默零更新 | `capacity < learning_starts`（省内存的配置）整轮不学习 | 配置校验直接拒绝 |
+| `target_update >= total_steps` | 目标网络整轮不同步，全部自举来自初始网络 | 配置校验拒绝 |
+| `--set` 缺少 `=` | 用户少打一个字符，得到 dacite 的 `TypeError` | 覆盖解析阶段报 `KEY=VALUE` |
+| YAML 字符串布尔被 `bool("false")` 反转 | 生成的配置/环境变量插值常是字符串 | dacite `type_hooks` 严格解析 |
+| 输出头仍用 `nn.Linear` | 头层是 `addmm` 热点（15–18% 的单步开销） | 头层也换 `FastLinear` |
+| CPU 采集用 torch 拷贝 | 紧跟引擎并行段时 76 KiB 拷贝 2.07 ms（numpy 0.094 ms） | CPU 路径改 numpy 赋值；`runner.step` 2.89 ms → **0.15 ms**，且与线程数无关 |
+| T>1 窗口跨回合携带旧帧 | GRU/Transformer 在新回合前 `frames-1` 步看到上一局的画面 | 回合结束后整窗重置为新首帧（与 `reset()` 一致） |
+| 固定 pinned staging 的非阻塞 H2D 被立即复用 | CUDA + `pin_memory`（默认）：下一步覆盖 staging 时上一份传输可能还没读 | 改为同步拷贝（76 KiB ≈ 10 µs），并在注释里说明原因 |
+| 玩具环境 `close()` 后仍可用 | 与 `SnakeVecEnv` 的语义不一致 | 加 closed 守卫 |
+| PPO 采集用 eval、更新用 train，dropout 让 ratio 失真 | `dropout > 0` 时 ratio 不是同一个函数的比值（实测 Δlogprob 0.0044） | PPO 配置直接拒绝 `dropout > 0`，并提示 DQN 支持 |
+| `ActionOutput.entropy` 采集时计算但没人用 | 每个环境步多算一次熵 | 删除该字段 |
+
+**否决（属于过度设计 / 收益不成立）**
+
+- **sum tree 用 `np.bincount` 代替 `np.add.at`**：实测更慢（116 µs vs 48 µs/次，
+  因为每层都要分配整层大小的数组）。
+- **把 PER 的优先级回写攒到每个向量步批量刷新**：只对"回放在 CPU、网络在 GPU"的
+  组合有意义，而该组合已经通过阻塞拷贝保证正确；为它引入队列和刷新点不划算。
+- **`target_kl` 的每 minibatch 同步改成每 N 个**：默认关闭，开启时这是刻意的即时止损；
+  为了省一次同步去改变停止语义不值得，改为在文档中说明该路径会有一次同步。
+- **把每 minibatch 的花式索引改为预分配**：256 条 `adv[idx]` 约 25 µs，对比 40 ms 的
+  minibatch 可忽略。
+- **GAE 的 Python 时间循环向量化**：每次 iterate 一次，约 3 ms，对比数秒的更新可忽略。
+
