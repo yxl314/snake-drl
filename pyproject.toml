@@ -1,0 +1,26 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "snake-drl"
+version = "1.0.0"
+description = "CPU batched snake engine with pybind11 bindings and a PyQt6 human play mode"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.23"]
+
+[project.optional-dependencies]
+play = ["PyQt6>=6.5"]
+
+[project.scripts]
+snake-play = "snake_drl.play.app:main"
+
+[tool.scikit-build]
+cmake.args = [
+  "-DSNAKE_BUILD_PYTHON=ON",
+  "-DSNAKE_BUILD_TESTS=OFF",
+  "-DSNAKE_BUILD_BENCHMARKS=OFF",
+  "-DSNAKE_ENABLE_IPO=OFF",
+  "-DSNAKE_ENABLE_INSTALL=OFF",
+]
+wheel.packages = ["python/snake_drl"]
