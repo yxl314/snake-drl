@@ -137,13 +137,17 @@ def test_string_booleans_are_parsed_strictly():
         from_dict({"train": {"progress": "maybe"}})
 
 
-def test_unknown_key_error_names_the_key():
-    with pytest.raises(ValueError, match="widthh"):
+def test_unknown_key_error_names_the_block_and_the_key():
+    with pytest.raises(ValueError, match=r"env.*widthh"):
         from_dict({"env": {"widthh": 8}})
+    with pytest.raises(ValueError, match=r"algorithm.*eps_strt"):
+        from_dict({"algorithm": {"type": "dqn", "eps_strt": 1.0}})
+    with pytest.raises(ValueError, match="unknown config section"):
+        from_dict({"environ": {"num_envs": 4}})
 
 
 def test_algorithm_block_must_be_a_mapping():
-    with pytest.raises(TypeError, match="algorithm block"):
+    with pytest.raises(TypeError, match=r"algorithm.*block"):
         from_dict({"algorithm": None})
 
 

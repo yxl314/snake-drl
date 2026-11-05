@@ -331,15 +331,12 @@ class ProjectConfig:
     train: TrainConfig = field(default_factory=TrainConfig)
 
     def __post_init__(self) -> None:
-        # ``algorithm`` is still the default here when built by ``from_dict``
-        # (the block is parsed separately and assigned afterwards), so the
-        # cross-field checks run in ``from_dict`` via validate().
         if not is_dataclass(self.algorithm):
             raise TypeError("algorithm must be a PPOConfig or DQNConfig")
+        self.validate()
 
     def validate(self) -> None:
-        """Cross-field checks; ``from_dict``/``load`` call this after the
-        algorithm block has been parsed and assigned."""
+        """Cross-field checks (also run by ``__post_init__``)."""
         if isinstance(self.algorithm, PPOConfig) and self.algorithm.type != "ppo":
             raise ValueError("PPOConfig.type must be 'ppo'")
         if isinstance(self.algorithm, DQNConfig) and self.algorithm.type == "ppo":
@@ -380,10 +377,35 @@ class ProjectConfig:
 # --------------------------------------------------------------------------- #
 # loading
 # --------------------------------------------------------------------------- #
-def _algorithm_from_dict(raw: dict[str, Any]) -> PPOConfig | DQNConfig:
+_BLOCKS: dict[str, type] = {
+    "run": RunConfig,
+    "env": EnvConfig,
+    "network": NetworkConfig,
+    "buffer": BufferConfig,
+    "train": TrainConfig,
+}
+
+
+def _parse_block(config_cls: type, raw: Any, block: str) -> Any:
+    """Build one config block, naming the block in every error message."""
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise TypeError(f"the {block!r} config block must be a mapping, got {type(raw).__name__}")
+    try:
+        return dacite.from_dict(config_cls, raw, config=_DACITE)
+    except UnexpectedDataError as exc:
+        keys = ", ".join(sorted(exc.keys))
+        raise ValueError(
+            f"unknown key(s) in the {block!r} config block: {keys} "
+            "-- check the spelling (or the --set argument)"
+        ) from None
+
+
+def _algorithm_from_dict(raw: Any) -> PPOConfig | DQNConfig:
     if not isinstance(raw, dict):
         raise TypeError(
-            f"the algorithm block must be a mapping, got {type(raw).__name__} "
+            f"the 'algorithm' config block must be a mapping, got {type(raw).__name__} "
             "(an empty YAML block is None)"
         )
     kind = str(raw.get("type", "dqn")).lower()
@@ -392,25 +414,21 @@ def _algorithm_from_dict(raw: dict[str, Any]) -> PPOConfig | DQNConfig:
     except KeyError:
         available = ", ".join(sorted(ALGORITHM_CONFIGS))
         raise ValueError(f"unknown algorithm type {kind!r}; available: {available}") from None
-    return dacite.from_dict(config_cls, raw, config=_DACITE)
+    return _parse_block(config_cls, raw, "algorithm")
 
 
 def from_dict(raw: dict[str, Any]) -> ProjectConfig:
     """Build a validated :class:`ProjectConfig` from a plain dictionary."""
     if not isinstance(raw, dict):
         raise TypeError(f"config root must be a mapping, got {type(raw).__name__}")
-    data = dict(raw)
-    algorithm = _algorithm_from_dict(data.pop("algorithm", {}))
-    try:
-        cfg = dacite.from_dict(ProjectConfig, data, config=_DACITE)
-    except UnexpectedDataError as exc:
-        keys = ", ".join(sorted(exc.keys))
+    known = set(_BLOCKS) | {"algorithm"}
+    unknown = sorted(set(raw) - known)
+    if unknown:
         raise ValueError(
-            f"unknown config key(s): {keys} -- check the spelling (or the --set argument)"
-        ) from None
-    cfg.algorithm = algorithm
-    cfg.validate()  # the algorithm block was parsed after __post_init__
-    return cfg
+            f"unknown config section(s): {', '.join(unknown)}; expected {', '.join(sorted(known))}"
+        )
+    blocks = {name: _parse_block(cls, raw.get(name, {}), name) for name, cls in _BLOCKS.items()}
+    return ProjectConfig(**blocks, algorithm=_algorithm_from_dict(raw.get("algorithm", {})))
 
 
 def apply_overrides(raw: dict[str, Any], overrides: list[str]) -> dict[str, Any]:
