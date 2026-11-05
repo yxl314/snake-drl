@@ -4,15 +4,25 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "snake-drl"
-version = "1.0.0"
-description = "CPU batched snake engine with pybind11 bindings and a PyQt6 human play mode"
-requires-python = ">=3.9"
-dependencies = ["numpy>=1.23"]
+version = "1.1.0"
+description = "CPU batched snake engine with a modular PPO/DQN deep-RL layer"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.23",
+  "torch>=2.1",
+  "omegaconf>=2.3",
+  "dacite>=1.8",
+  "tqdm>=4.60",
+]
 
 [project.optional-dependencies]
 play = ["PyQt6>=6.5"]
+tensorboard = ["tensorboard>=2.13"]
+dev = ["pytest>=7.4", "pytest-timeout>=2.1"]
 
 [project.scripts]
+snake-drl = "snake_drl.cli:main"
 snake-play = "snake_drl.play.app:main"
 
 [tool.scikit-build]
@@ -24,3 +34,11 @@ cmake.args = [
   "-DSNAKE_ENABLE_INSTALL=OFF",
 ]
 wheel.packages = ["python/snake_drl"]
+sdist.include = ["core/", "bindings/", "configs/", "docs/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = [
+  "ignore:The given NumPy array is not writable:UserWarning",
+]
