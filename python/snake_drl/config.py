@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 # Values OmegaConf may hand back as strings; dacite coerces them.
-_CASTS = (int, float, str)
+_CASTS = [int, float, str]
 
 
 # --------------------------------------------------------------------------- #
@@ -377,7 +377,7 @@ def load(path: str | None = None, overrides: list[str] | None = None) -> Project
 
         cfg = load("configs/dqn_cnn.yaml", ["train.total_steps=10000"])
     """
-    raw = {}
+    raw: dict[str, Any] = {}
     if path:
         raw = OmegaConf.to_container(OmegaConf.load(path), resolve=True)  # type: ignore[assignment]
     return from_dict(apply_overrides(dict(raw), list(overrides or [])))

@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 play = ["PyQt6>=6.5"]
 tensorboard = ["tensorboard>=2.13"]
-dev = ["pytest>=7.4", "pytest-timeout>=2.1"]
+dev = ["pytest>=7.4", "mypy>=1.8", "ruff>=0.6"]
 
 [project.scripts]
 snake-drl = "snake_drl.cli:main"
@@ -55,3 +55,11 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 "python/tests/*" = ["E501"]
 # The PyQt6 front-end predates this style pass; reformatting it is noise.
 "python/snake_drl/play/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# The PyQt6 stubs shipped for this environment do not parse under mypy 2.x
+# ("'/' parameter must appear before '*'"), and the Qt front-end plus the CLI
+# shell that imports it are thin, untested-by-types adapters.
+exclude = ["^python/snake_drl/play/", '^python/snake_drl/cli\.py$']

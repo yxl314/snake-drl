@@ -101,6 +101,7 @@ class EvalCallback(Callback):
         self.every = int(every)
         self.logger = logger
         self._next = self.every
+        self._last_step = -1
 
     def on_iteration(self, trainer: Trainer, metrics: dict[str, float]) -> None:
         if trainer.env_steps >= self._next:
@@ -111,6 +112,10 @@ class EvalCallback(Callback):
         self._evaluate(trainer)
 
     def _evaluate(self, trainer: Trainer) -> None:
+        # The final iteration may already have evaluated at this exact step.
+        if trainer.env_steps == self._last_step:
+            return
+        self._last_step = trainer.env_steps
         results = self.evaluator.run(trainer.algorithm.policy)
         if self.logger is not None:
             self.logger.log(trainer.env_steps, results)
@@ -132,6 +137,7 @@ class CheckpointCallback(Callback):
         self.config = config
         self.keep_last = int(keep_last)
         self._next = self.every
+        self._last_step = -1
         self.last_path: Path | None = None
 
     def on_iteration(self, trainer: Trainer, metrics: dict[str, float]) -> None:
@@ -143,6 +149,9 @@ class CheckpointCallback(Callback):
         self._save(trainer)
 
     def _save(self, trainer: Trainer) -> None:
+        if trainer.env_steps == self._last_step:
+            return
+        self._last_step = trainer.env_steps
         path = save_checkpoint(
             self.run_dir / f"checkpoint_{trainer.env_steps:012d}.pt",
             trainer.algorithm,

@@ -7,11 +7,13 @@ episodes at ``n_steps`` and throw away the agents' progress.
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
-import torch.nn as nn
 
 from ..buffers.rollout import RolloutBuffer
 from ..config import PPOConfig
+from ..nn.policies import ActorCriticPolicy
 from ..runner import VectorRunner
 from .base import Algorithm
 from .gae import compute_gae
@@ -24,10 +26,12 @@ _STAT_KEYS = ("policy_loss", "value_loss", "entropy", "approx_kl", "clip_frac")
 
 
 class PPO(Algorithm):
+    policy: ActorCriticPolicy
+
     def __init__(
         self,
         cfg: PPOConfig,
-        policy: nn.Module,
+        policy: ActorCriticPolicy,
         runner: VectorRunner,
         buffer: RolloutBuffer,
         optimizer: torch.optim.Optimizer,
@@ -188,12 +192,12 @@ class PPO(Algorithm):
         return cfg.lr * (1.0 - progress)
 
     # ------------------------------------------------------------ lifecycle
-    def state_dict(self) -> dict[str, object]:
+    def state_dict(self) -> dict[str, Any]:
         state = super().state_dict()
         state["optimizer"] = self.optimizer.state_dict()
         return state
 
-    def load_state_dict(self, state: dict[str, object]) -> None:
+    def load_state_dict(self, state: dict[str, Any]) -> None:
         super().load_state_dict(state)
         if "optimizer" in state:
-            self.optimizer.load_state_dict(state["optimizer"])  # type: ignore[arg-type]
+            self.optimizer.load_state_dict(state["optimizer"])

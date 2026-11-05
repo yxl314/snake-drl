@@ -19,19 +19,22 @@ Counters have one meaning each:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import torch
-import torch.nn as nn
 
+from ..nn.policies import ActorCriticPolicy, QPolicy
 from ..runner import VectorRunner
 
 __all__ = ["Algorithm"]
 
 
 class Algorithm(ABC):
+    policy: ActorCriticPolicy | QPolicy
+
     def __init__(
         self,
-        policy: nn.Module,
+        policy: ActorCriticPolicy | QPolicy,
         runner: VectorRunner,
         device: torch.device,
         *,
@@ -59,7 +62,7 @@ class Algorithm(ABC):
         """Implementation of :meth:`iterate`; subclasses override this."""
 
     # ------------------------------------------------------------ lifecycle
-    def state_dict(self) -> dict[str, object]:
+    def state_dict(self) -> dict[str, Any]:
         return {
             "policy": self.policy.state_dict(),
             "env_steps": self.env_steps,
@@ -67,8 +70,8 @@ class Algorithm(ABC):
             "iterations": self.iterations,
         }
 
-    def load_state_dict(self, state: dict[str, object]) -> None:
-        self.policy.load_state_dict(state["policy"])  # type: ignore[arg-type]
+    def load_state_dict(self, state: dict[str, Any]) -> None:
+        self.policy.load_state_dict(state["policy"])
         self.env_steps = int(state.get("env_steps", 0))
         self.updates = int(state.get("updates", 0))
         self.iterations = int(state.get("iterations", 0))

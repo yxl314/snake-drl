@@ -14,6 +14,7 @@ from collections.abc import Callable
 import torch
 
 from ..envs import VectorEnv
+from ..nn.policies import ActorCriticPolicy, QPolicy
 from ..runner import VectorRunner
 
 __all__ = ["Evaluator"]
@@ -38,7 +39,7 @@ class Evaluator:
         self.max_steps = int(max_steps)
 
     @torch.no_grad()
-    def run(self, policy: torch.nn.Module) -> dict[str, float]:
+    def run(self, policy: ActorCriticPolicy | QPolicy) -> dict[str, float]:
         """Run greedy episodes and return ``eval/*`` metrics.
 
         The policy must expose ``frames`` and ``greedy(obs)`` (both built-in

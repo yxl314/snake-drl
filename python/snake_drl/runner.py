@@ -92,6 +92,7 @@ class VectorRunner:
         self._truncated = torch.empty(self.num_envs, dtype=torch.bool, device=self.device)
         self._done = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
 
+        self._closed = False
         self._staging: torch.Tensor | None = None
         self._pin_reward = self._pin_terminated = self._pin_truncated = None
         if pin_memory and self.device.type == "cuda":
@@ -135,6 +136,7 @@ class VectorRunner:
     # ------------------------------------------------------------------- api
     def reset(self) -> torch.Tensor:
         """Reset every environment and return the first window."""
+        self._require_open()
         frame = torch.from_numpy(self.env.reset())
         if self.frames == 1:
             self._frame.copy_(frame)
@@ -148,6 +150,7 @@ class VectorRunner:
 
     def step(self, actions: torch.Tensor | np.ndarray) -> StepBatch:
         """Advance every environment by one step; returns views, not copies."""
+        self._require_open()
         if isinstance(actions, torch.Tensor):
             actions_np = actions.detach().to("cpu").numpy().astype(np.int8, copy=False)
         else:
@@ -194,4 +197,11 @@ class VectorRunner:
         return self._frame.unsqueeze(1) if self.frames == 1 else self._window
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self.env.close()
+
+    def _require_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("this VectorRunner has been closed")

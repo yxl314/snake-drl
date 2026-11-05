@@ -21,11 +21,14 @@ false, including truncated steps, using the final observation stored as
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 import torch.nn.functional as F
 
 from ..buffers.protocols import ReplayProtocol
 from ..config import DQNConfig
+from ..nn.policies import QPolicy
 from ..runner import VectorRunner
 from .base import Algorithm
 from .exploration import BetaFn, EpsilonFn
@@ -66,11 +69,14 @@ def q_target(
 
 
 class DQN(Algorithm):
+    policy: QPolicy
+    target_policy: QPolicy
+
     def __init__(
         self,
         cfg: DQNConfig,
-        policy: torch.nn.Module,
-        target_policy: torch.nn.Module,
+        policy: QPolicy,
+        target_policy: QPolicy,
         runner: VectorRunner,
         replay: ReplayProtocol,
         optimizer: torch.optim.Optimizer,
@@ -186,16 +192,16 @@ class DQN(Algorithm):
             self._next_target = self.env_steps + cfg.target_update
 
     # ------------------------------------------------------------ lifecycle
-    def state_dict(self) -> dict[str, object]:
+    def state_dict(self) -> dict[str, Any]:
         state = super().state_dict()
         state["target_policy"] = self.target_policy.state_dict()
         state["optimizer"] = self.optimizer.state_dict()
         state["next_target"] = self._next_target
         return state
 
-    def load_state_dict(self, state: dict[str, object]) -> None:
+    def load_state_dict(self, state: dict[str, Any]) -> None:
         super().load_state_dict(state)
-        self.target_policy.load_state_dict(state["target_policy"])  # type: ignore[arg-type]
+        self.target_policy.load_state_dict(state["target_policy"])
         if "optimizer" in state:
-            self.optimizer.load_state_dict(state["optimizer"])  # type: ignore[arg-type]
-        self._next_target = int(state.get("next_target", self.cfg.target_update))
+            self.optimizer.load_state_dict(state["optimizer"])
+        self._next_target = int(state.get("next_target") or self.cfg.target_update)

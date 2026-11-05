@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import torch
 from omegaconf import OmegaConf
@@ -25,6 +26,7 @@ from ..config import DQNConfig, PPOConfig, ProjectConfig, apply_overrides, from_
 from ..device import Runtime, configure_runtime, resolve_device
 from ..envs import VectorEnv, make_env
 from ..nn.build import build_policy
+from ..nn.policies import ActorCriticPolicy, QPolicy
 from ..runner import VectorRunner
 from ..seeding import derive_seed, seed_all
 from ..spaces import ActionSpec, ObsSpec
@@ -44,9 +46,9 @@ __all__ = ["build_algorithm", "build_evaluator", "build_trainer", "load_policy"]
 
 def _build_policy(
     cfg: ProjectConfig, obs_spec: ObsSpec, action_spec: ActionSpec, device: torch.device
-) -> torch.nn.Module:
+) -> ActorCriticPolicy | QPolicy:
     dueling = bool(getattr(cfg.algorithm, "is_dueling", False))
-    return build_policy(
+    policy = build_policy(
         cfg.network,
         obs_spec,
         action_spec,
@@ -54,6 +56,8 @@ def _build_policy(
         device=device,
         dueling=dueling,
     )
+    assert isinstance(policy, (ActorCriticPolicy, QPolicy))
+    return policy
 
 
 def _replay_device(cfg: ProjectConfig, compute: torch.device) -> torch.device:
@@ -82,14 +86,14 @@ def build_algorithm(
     horizon = cfg.train.total_steps if total_steps is None else total_steps
 
     if isinstance(cfg.algorithm, PPOConfig):
-        algo_cfg = cfg.algorithm
+        ppo_cfg = cfg.algorithm
         rollout = RolloutBuffer(
-            algo_cfg.n_steps, env.num_envs, env.obs_spec, policy.frames, runtime.device
+            ppo_cfg.n_steps, env.num_envs, env.obs_spec, policy.frames, runtime.device
         )
-        optimizer = torch.optim.Adam(policy.parameters(), lr=algo_cfg.lr, eps=algo_cfg.adam_eps)
+        optimizer = torch.optim.Adam(policy.parameters(), lr=ppo_cfg.lr, eps=ppo_cfg.adam_eps)
         return PPO(
-            algo_cfg,
-            policy,
+            ppo_cfg,
+            cast(ActorCriticPolicy, policy),
             runner,
             rollout,
             optimizer,
@@ -98,7 +102,7 @@ def build_algorithm(
         )
 
     if isinstance(cfg.algorithm, DQNConfig):
-        algo_cfg = cfg.algorithm
+        dqn_cfg = cfg.algorithm
         replay = build_replay(
             cfg.buffer,
             env.obs_spec,
@@ -107,17 +111,20 @@ def build_algorithm(
             pin_memory=cfg.run.pin_memory,
             seed=derive_seed(cfg.run.seed, 7),
         )
-        target = copy.deepcopy(policy).to(runtime.device)
-        optimizer = torch.optim.Adam(policy.parameters(), lr=algo_cfg.lr, eps=algo_cfg.adam_eps)
+        q_policy = cast(QPolicy, policy)
+        target = copy.deepcopy(q_policy).to(runtime.device)
+        optimizer = torch.optim.Adam(policy.parameters(), lr=dqn_cfg.lr, eps=dqn_cfg.adam_eps)
         return DQN(
-            algo_cfg,
-            policy,
+            dqn_cfg,
+            q_policy,
             target,
             runner,
             replay,
             optimizer,
             runtime.device,
-            epsilon=LinearSchedule(algo_cfg.eps_start, algo_cfg.eps_end, algo_cfg.eps_decay_steps),
+            epsilon=LinearSchedule(
+                dqn_cfg.eps_start, dqn_cfg.eps_end, dqn_cfg.eps_decay_steps
+            ),
             beta=LinearSchedule(cfg.buffer.beta0, 1.0, cfg.buffer.beta_steps),
             total_steps=horizon,
         )

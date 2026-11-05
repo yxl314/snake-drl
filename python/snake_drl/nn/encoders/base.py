@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
 import torch
@@ -44,7 +45,7 @@ def conv_stem(channels: int, widths: Iterable[int], kernel: int, stride: int) ->
     return nn.Sequential(*blocks)
 
 
-class Encoder(nn.Module):
+class Encoder(nn.Module, ABC):
     """Maps ``(B, T, *frame)`` to ``(B, feature_dim)``.
 
     ``frames`` is a property of the encoder, not of the algorithm: the runner
@@ -66,5 +67,6 @@ class Encoder(nn.Module):
             name = type(self).__name__
             raise ValueError(f"{name} accepts {self.accepts} observations, got {spec.kind!r}")
 
-    def forward(self, obs: torch.Tensor) -> torch.Tensor:  # pragma: no cover - abstract
-        raise NotImplementedError
+    @abstractmethod
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        """Encode a window into ``(B, feature_dim)``."""

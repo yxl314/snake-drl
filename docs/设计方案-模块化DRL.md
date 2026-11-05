@@ -178,7 +178,8 @@ algo    = PPO(cfg.algorithm, policy, runner, buffer, optimizer, device)
   玩具环境的额外参数走 `env.kwargs`（`length`/`n_ctx`），`max_episode_steps` 与其他环境一样
   取自顶层字段——早期版本里玩具环境忽略这个字段，导致"永不结束的评估"。
 - `SnakeVecEnv.close()` 可重复调用，关闭后再用会抛出明确的 `RuntimeError`，而不是
-  `AttributeError: 'NoneType'`。
+  `AttributeError: 'NoneType'`；`VectorRunner` 有同样的守卫。
+- 编码器基类的 `forward` 是 `@abstractmethod`，忘记实现会在实例化时立刻报错。
 
 ---
 
@@ -527,6 +528,10 @@ snake-drl eval -m runs/<run>/latest.pt --episodes 20
   DQN 的 `_iterate` 拆出 `_credit_updates`。
 - 类型标注现代化：`list[int]`、`X | None`、`collections.abc.Callable`。
 - `ruff`（`E,F,W,I,UP,B,SIM`）与 `ruff format` 全绿，规则写进 `pyproject.toml`。
+- `mypy` 对 49 个源文件零错误：策略族按具体类收窄（`PPO.policy: ActorCriticPolicy`、
+  `DQN.policy: QPolicy`），检查点负载用 `dict[str, Any]`，删掉了全部 `type: ignore`。
+  `play/` 与 `cli.py` 排除：本机 PyQt6 的 `.pyi` 在 mypy 2.x 下无法解析
+  （`'/' parameter must appear before '*'`），而这两处是薄适配层。
 
 ### 17.3 底层屏蔽
 
@@ -569,3 +574,5 @@ snake-drl eval -m runs/<run>/latest.pt --episodes 20
   直接把 CPU 张量喂给 GPU 网络的问题。
 - checkpoint 的 `latest.pt` 改为 `shutil.copyfile` 流式复制，不再把整个文件读入内存两次。
 - 指标继续"一次 iterate 一次同步"；PPO 的统计量改为一次 `stack` + 一次 `tolist()`。
+- 训练结束时不再重复评估/重复写 checkpoint：`EvalCallback` 与 `CheckpointCallback`
+  记录最后一步，`on_end` 只在最后一步尚未处理时才执行。
