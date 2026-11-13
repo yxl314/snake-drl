@@ -115,7 +115,17 @@ snake-drl play --model runs/<dir>/latest.pt --record demo.gif --episodes 3
 
 ![training report](docs/assets/training-report.png)
 
+Watch mode and the recorded GIF show the same board — the recorder renders the
+same `(3, H, W)` planes the Qt window paints:
+
+![watch window](docs/assets/watch-window.png)
+
 ![agent demo](docs/assets/agent-demo.gif)
+
+The two return curves intentionally differ. The training curve runs with
+exploration (`epsilon` decays towards `algorithm.eps_end`), so episodes end
+early and the return stays low; the eval curve is greedy and is the one to
+judge progress by. A large gap is expected, not a logging bug.
 
 ## Design in one paragraph
 

@@ -89,8 +89,11 @@ class AgentSession:
 
     @property
     def episode_label(self) -> str:
-        """One-line status for the window's HUD."""
-        return f"score={self.score} length={self.length} steps={self.steps}"
+        """One-line status for the window's HUD.
+
+        Chinese, matching the rest of the Qt front-end (`得分 …` in human mode).
+        """
+        return f"得分 {self.score}    长度 {self.length}    步数 {self.steps}"
 
     # ------------------------------------------------------------------ moves
 
