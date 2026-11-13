@@ -111,6 +111,12 @@ snake-drl play --model runs/<dir>/latest.pt --record demo.gif --episodes 3
 `--episodes` applies to `--record` and defaults to 3. Without `--model`,
 `snake-drl play` is still the human game.
 
+真实产物（`configs/dqn_mlp.yaml`，60k 环境步，CPU）：
+
+![training report](docs/assets/training-report.png)
+
+![agent demo](docs/assets/agent-demo.gif)
+
 ## Design in one paragraph
 
 The engine emits a zero-copy `(N,3,H,W)` uint8 view per step. A single
