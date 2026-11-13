@@ -76,7 +76,7 @@ void VecSnakeTestAccess::force_food(VecSnakeImpl& env, std::uint16_t cell) {
 
 void VecSnakeTestAccess::force_food(VecSnakeImpl& env, int env_index, std::uint16_t cell) {
   auto free = env.free_cells(env_index);
-  const std::size_t index = static_cast<std::size_t>(env_index);
+  const auto index = static_cast<std::size_t>(env_index);
   if (env.food_[index] != kInvalidCell) {
     free.add(env.food_[index]);
   }
@@ -92,13 +92,9 @@ void VecSnakeTestAccess::force_food(VecSnakeImpl& env, int env_index, std::uint1
   }
 }
 
-void VecSnakeTestAccess::corrupt_duplicate_body(VecSnakeImpl& env) {
-  env.body_[1] = env.body_[0];
-}
+void VecSnakeTestAccess::corrupt_duplicate_body(VecSnakeImpl& env) { env.body_[1] = env.body_[0]; }
 
-void VecSnakeTestAccess::corrupt_free_count(VecSnakeImpl& env) {
-  ++env.free_count_[0];
-}
+void VecSnakeTestAccess::corrupt_free_count(VecSnakeImpl& env) { ++env.free_count_[0]; }
 
 void VecSnakeTestAccess::corrupt_row_bitmap(VecSnakeImpl& env) {
   row_clear(env.rows_[static_cast<std::size_t>(cell_y(env.head_[0]))], cell_x(env.head_[0]));
@@ -109,16 +105,12 @@ void VecSnakeTestAccess::corrupt_observation(VecSnakeImpl& env) {
   env.obs_[0] ^= 1;
 }
 
-void VecSnakeTestAccess::corrupt_score(VecSnakeImpl& env) {
-  ++env.score_[0];
-}
+void VecSnakeTestAccess::corrupt_score(VecSnakeImpl& env) { ++env.score_[0]; }
 
 void VecSnakeTestAccess::corrupt_head_index(VecSnakeImpl& env) {
   env.head_idx_[0] = static_cast<std::uint16_t>((env.head_idx_[0] + 1) % env.cells_);
 }
 
-void VecSnakeTestAccess::corrupt_head_cell(VecSnakeImpl& env) {
-  env.head_[0] = env.food_[0];
-}
+void VecSnakeTestAccess::corrupt_head_cell(VecSnakeImpl& env) { env.head_[0] = env.food_[0]; }
 
 }  // namespace snake::detail

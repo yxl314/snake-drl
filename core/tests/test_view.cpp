@@ -106,7 +106,7 @@ void run_view_tests() {
     CHECK(grid.size() == static_cast<std::size_t>(num_envs) * env_size);
 
     // Plane 0 of env 1 starts after one full environment.
-    const std::size_t base = static_cast<std::size_t>(env_size);
+    const auto base = static_cast<std::size_t>(env_size);
     data[base + 4] = 7;
     CHECK(grid.at(1, 0, 1, 1) == 7);
     CHECK(grid.plane(1, 0).size() == static_cast<std::size_t>(height * width));

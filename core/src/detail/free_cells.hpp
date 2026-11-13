@@ -57,8 +57,8 @@ class FreeCellSet {
     return cell;
   }
 
-  int size() const noexcept { return *size_; }
-  bool empty() const noexcept { return *size_ == 0; }
+  [[nodiscard]] int size() const noexcept { return *size_; }
+  [[nodiscard]] bool empty() const noexcept { return *size_ == 0; }
 
  private:
   void remove_at(int index) noexcept {

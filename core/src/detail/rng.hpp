@@ -42,7 +42,7 @@ class Xoshiro256 {
   std::uint32_t bounded(std::uint32_t bound) noexcept {
     assert(bound > 0);
     std::uint64_t product = static_cast<std::uint64_t>(static_cast<std::uint32_t>(next())) * bound;
-    std::uint32_t low = static_cast<std::uint32_t>(product);
+    auto low = static_cast<std::uint32_t>(product);
     if (low < bound) {
       const std::uint32_t threshold = (0U - bound) % bound;
       while (low < threshold) {

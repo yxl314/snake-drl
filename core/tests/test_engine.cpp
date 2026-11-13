@@ -424,7 +424,7 @@ void test_win_and_final_state() {
 
   const auto final_obs = env.final_observations();
   CHECK(final_obs.valid());
-  const std::size_t cells = static_cast<std::size_t>(env.cells());
+  const auto cells = static_cast<std::size_t>(env.cells());
   int body_count = 0;
   int head_count = 0;
   int food_count = 0;

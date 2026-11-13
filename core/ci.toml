@@ -1,0 +1,25 @@
+# cxx_ci 配置 —— snake-drl 的 C++ 核心
+#
+# 在 core/ 目录运行：
+#     python3 ../../cxx_ci/ci/ci.py -c ci.toml
+#
+# 项目是 CPU-only 的 C++17 库，构建系统 CMake，测试走 ctest。
+name = "snake-core"
+build_system = "cmake"
+source_dir = "."
+project_file = "CMakeLists.txt"
+build_dir = "build/ci"
+# 编译数据库给 clang-tidy 用；单独的构建目录避免和开发构建互相干扰。
+# 基准程序不参与门禁：它不计入测试，编出来也没人跑。
+configure_args = ["-DCMAKE_BUILD_TYPE=Debug",
+                  "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+                  "-DSNAKE_BUILD_BENCHMARKS=OFF"]
+build_args = ["--"]
+
+[output]
+build = "warnings"
+test = "failures"
+dir = "ci-logs"
+
+[test]
+framework = "ctest"

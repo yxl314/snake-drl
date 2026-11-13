@@ -45,9 +45,7 @@ ThreadPool::ThreadPool(int total_threads, int total_items)
   }
 }
 
-ThreadPool::~ThreadPool() noexcept {
-  stop_workers();
-}
+ThreadPool::~ThreadPool() noexcept { stop_workers(); }
 
 void ThreadPool::start_workers() {
   const int count = total_threads_ - 1;

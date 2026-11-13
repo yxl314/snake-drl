@@ -1,0 +1,66 @@
+# cxx_audit 配置 —— snake-drl 的 C++ 核心
+#
+# 在 core/ 目录运行：
+#     PYTHONPATH=../../../cxx_audit/src python3 -m cpp_audit -c audit.toml all
+[project]
+name = "snake-core"
+root = "."
+sources = ["src", "include", "tests", "benchmarks"]
+excludes = ["build", ".git", "docs", "reports", "ci-logs", "test-logs", "third_party"]
+build_system = "cmake"
+project_file = "CMakeLists.txt"
+build_dir = "build/audit"
+target = "snake_core_tests"
+
+[compat]
+# 本项目明确要求 C++17；compat 规则面向 C++98，启用只会产生系统性误报。
+enabled = false
+rules = []
+
+[tidy]
+enabled = true
+# 检查集在项目根的 .clang-tidy 里，现代化写法检查全面开启。
+report = "reports/clang-tidy.txt"
+fail_on_warnings = true
+jobs = 24
+
+[cpd]
+enabled = true
+dirs = ["src", "include"]
+# pimpl 的公开头文件与实现头文件必然重复声明同一套 API，属于结构性重复。
+# 阈值定在 100 tokens，让真正的复制粘贴仍然暴露出来。
+min_tokens = 100
+report = "reports/cpd.txt"
+
+[asan]
+# 当前环境是 PRoot-Distro，ASan 运行期会报
+#   AddressSanitizer: CHECK failed: sanitizer_allocator_primary64.h
+# 这是运行环境限制，不是代码问题。普通 Linux 主机上改回 true。
+enabled = false
+build_dir = "build/asan"
+targets = ["snake_core_tests"]
+compiler = "clang++"
+cxxflags = ["-std=c++17", "-fsanitize=address",
+            "-fsanitize-address-use-after-return=always",
+            "-fno-omit-frame-pointer", "-g", "-O0"]
+ldflags = ["-fsanitize=address"]
+checks = ["detect_leaks", "detect_stack_use_after_return"]
+options = { halt_on_error = "0", symbolize = "1" }
+report = "reports/asan.txt"
+timeout_sec = 120
+
+[valgrind]
+enabled = true
+build_dir = "build/debug"
+targets = ["snake_core_tests"]
+compiler = "clang++"
+cxxflags = ["-std=c++17", "-g", "-O0"]
+tool = "memcheck"
+checks = ["leaks"]
+extra_args = ["--undef-value-errors=no",
+              "--errors-for-leak-kinds=definite,indirect"]
+report = "reports/valgrind.txt"
+timeout_sec = 300
+
+[reports]
+dir = "reports"

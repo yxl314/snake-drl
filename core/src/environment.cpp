@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstring>
 #include <limits>
@@ -8,8 +9,9 @@
 namespace snake::detail {
 namespace {
 
-constexpr int kDx[4] = {0, 1, 0, -1};
-constexpr int kDy[4] = {-1, 0, 1, 0};
+// 四个方向的分量。std::array 与 C 数组在优化后生成同样的代码，但保留尺寸信息。
+constexpr std::array<int, 4> kDx = {0, 1, 0, -1};
+constexpr std::array<int, 4> kDy = {-1, 0, 1, 0};
 
 // Step counters are public as int32. With both limits disabled a perfect policy
 // can run long enough to overflow them, which would be UB, so saturate instead.

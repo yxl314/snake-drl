@@ -30,8 +30,8 @@ class ThreadPool {
   ThreadPool(ThreadPool&&) = delete;
   ThreadPool& operator=(ThreadPool&&) = delete;
 
-  int total_threads() const noexcept { return total_threads_; }
-  bool parallel() const noexcept { return total_threads_ > 1; }
+  [[nodiscard]] int total_threads() const noexcept { return total_threads_; }
+  [[nodiscard]] bool parallel() const noexcept { return total_threads_ > 1; }
 
   template <typename Fn>
   void parallel_for(Fn&& fn) noexcept {
@@ -68,7 +68,7 @@ class ThreadPool {
   void wait_for_workers_ready() noexcept;
   void wait_for_completion() noexcept;
   void run_chunk(int chunk) noexcept;
-  int worker_count() const noexcept { return static_cast<int>(workers_.size()); }
+  [[nodiscard]] int worker_count() const noexcept { return static_cast<int>(workers_.size()); }
 
   int total_threads_ = 1;
   int total_items_ = 1;

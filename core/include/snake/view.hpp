@@ -123,10 +123,9 @@ class GridView {
     assert(env >= 0 && env < num_envs_);
     assert(channel >= 0 && channel < kChannels);
     const size_type plane_size = static_cast<size_type>(height_) * static_cast<size_type>(width_);
-    return Span<const std::uint8_t>(
-        data_ + static_cast<size_type>(env) * static_cast<size_type>(kChannels) * plane_size +
-            static_cast<size_type>(channel) * plane_size,
-        plane_size);
+    return {data_ + static_cast<size_type>(env) * static_cast<size_type>(kChannels) * plane_size +
+                static_cast<size_type>(channel) * plane_size,
+            plane_size};
   }
 
   // All three channels for one environment: (3, H, W).
@@ -134,12 +133,10 @@ class GridView {
     assert(env >= 0 && env < num_envs_);
     const size_type env_size = static_cast<size_type>(kChannels) * static_cast<size_type>(height_) *
                                static_cast<size_type>(width_);
-    return Span<const std::uint8_t>(data_ + static_cast<size_type>(env) * env_size, env_size);
+    return {data_ + static_cast<size_type>(env) * env_size, env_size};
   }
 
-  [[nodiscard]] Span<const std::uint8_t> span() const noexcept {
-    return Span<const std::uint8_t>(data_, size());
-  }
+  [[nodiscard]] Span<const std::uint8_t> span() const noexcept { return {data_, size()}; }
 
  private:
   [[nodiscard]] size_type index(int env, int channel, int y, int x) const noexcept {

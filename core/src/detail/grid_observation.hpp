@@ -17,9 +17,9 @@ class GridObservation {
   GridObservation(std::uint8_t* data, int width, int height) noexcept
       : data_(data), width_(width), height_(height), cells_(width * height) {}
 
-  bool enabled() const noexcept { return data_ != nullptr; }
+  [[nodiscard]] bool enabled() const noexcept { return data_ != nullptr; }
 
-  std::uint8_t* data() const noexcept { return data_; }
+  [[nodiscard]] std::uint8_t* data() const noexcept { return data_; }
 
   void set_body(std::uint16_t cell, std::uint8_t value) noexcept {
     if (data_ == nullptr) {

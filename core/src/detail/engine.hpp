@@ -23,9 +23,7 @@ struct VecSnakeTestAccess;
 // Explicit index conversion for the many int-indexed SoA arrays. Keeping the
 // cast in one place makes -Wsign-conversion meaningful without littering the
 // hot path with static_cast<std::size_t>.
-constexpr std::size_t idx(int value) noexcept {
-  return static_cast<std::size_t>(value);
-}
+constexpr std::size_t idx(int value) noexcept { return static_cast<std::size_t>(value); }
 
 class VecSnakeImpl {
  public:
@@ -44,56 +42,50 @@ class VecSnakeImpl {
   void reseed_all(std::uint64_t seed) noexcept;
   void reseed_env(int env, std::uint64_t seed);
 
-  const VecConfig& config() const noexcept { return config_; }
-  int num_envs() const noexcept { return n_; }
-  int width() const noexcept { return width_; }
-  int height() const noexcept { return height_; }
-  int cells() const noexcept { return cells_; }
-  int active_threads() const noexcept { return pool_->total_threads(); }
+  [[nodiscard]] const VecConfig& config() const noexcept { return config_; }
+  [[nodiscard]] int num_envs() const noexcept { return n_; }
+  [[nodiscard]] int width() const noexcept { return width_; }
+  [[nodiscard]] int height() const noexcept { return height_; }
+  [[nodiscard]] int cells() const noexcept { return cells_; }
+  [[nodiscard]] int active_threads() const noexcept { return pool_->total_threads(); }
 
   [[nodiscard]] GridView observations() const noexcept {
-    return GridView(obs_.empty() ? nullptr : obs_.data(), n_, height_, width_);
+    return {obs_.empty() ? nullptr : obs_.data(), n_, height_, width_};
   }
   [[nodiscard]] GridView final_observations() const noexcept {
-    return GridView(final_obs_.empty() ? nullptr : final_obs_.data(), n_, height_, width_);
+    return {final_obs_.empty() ? nullptr : final_obs_.data(), n_, height_, width_};
   }
   [[nodiscard]] BoardView bitboards() const noexcept {
-    return BoardView(rows_.empty() ? nullptr : rows_.data(), n_, height_);
+    return {rows_.empty() ? nullptr : rows_.data(), n_, height_};
   }
   [[nodiscard]] BoardView final_bitboards() const noexcept {
-    return BoardView(final_rows_.empty() ? nullptr : final_rows_.data(), n_, height_);
+    return {final_rows_.empty() ? nullptr : final_rows_.data(), n_, height_};
   }
 
-  [[nodiscard]] CellView head_cells() const noexcept { return CellView(head_.data(), n_); }
-  [[nodiscard]] CellView food_cells() const noexcept { return CellView(food_.data(), n_); }
+  [[nodiscard]] CellView head_cells() const noexcept { return {head_.data(), n_}; }
+  [[nodiscard]] CellView food_cells() const noexcept { return {food_.data(), n_}; }
   [[nodiscard]] CellView final_head_cells() const noexcept {
-    return CellView(final_head_.empty() ? nullptr : final_head_.data(), n_);
+    return {final_head_.empty() ? nullptr : final_head_.data(), n_};
   }
   [[nodiscard]] CellView final_food_cells() const noexcept {
-    return CellView(final_food_.empty() ? nullptr : final_food_.data(), n_);
+    return {final_food_.empty() ? nullptr : final_food_.data(), n_};
   }
 
-  [[nodiscard]] FloatView rewards() const noexcept { return FloatView(rewards_.data(), n_); }
-  [[nodiscard]] FloatView returns() const noexcept { return FloatView(returns_.data(), n_); }
-  [[nodiscard]] FloatView final_returns() const noexcept {
-    return FloatView(final_returns_.data(), n_);
-  }
-  [[nodiscard]] Int32View scores() const noexcept { return Int32View(score_.data(), n_); }
-  [[nodiscard]] Int32View lengths() const noexcept { return Int32View(len_.data(), n_); }
-  [[nodiscard]] Int32View steps() const noexcept { return Int32View(steps_.data(), n_); }
-  [[nodiscard]] Int32View final_scores() const noexcept {
-    return Int32View(final_score_.data(), n_);
-  }
-  [[nodiscard]] Int32View final_lengths() const noexcept {
-    return Int32View(final_len_.data(), n_);
-  }
+  [[nodiscard]] FloatView rewards() const noexcept { return {rewards_.data(), n_}; }
+  [[nodiscard]] FloatView returns() const noexcept { return {returns_.data(), n_}; }
+  [[nodiscard]] FloatView final_returns() const noexcept { return {final_returns_.data(), n_}; }
+  [[nodiscard]] Int32View scores() const noexcept { return {score_.data(), n_}; }
+  [[nodiscard]] Int32View lengths() const noexcept { return {len_.data(), n_}; }
+  [[nodiscard]] Int32View steps() const noexcept { return {steps_.data(), n_}; }
+  [[nodiscard]] Int32View final_scores() const noexcept { return {final_score_.data(), n_}; }
+  [[nodiscard]] Int32View final_lengths() const noexcept { return {final_len_.data(), n_}; }
 
-  [[nodiscard]] ByteView dones() const noexcept { return ByteView(done_.data(), n_); }
-  [[nodiscard]] ByteView terminated() const noexcept { return ByteView(terminated_.data(), n_); }
-  [[nodiscard]] ByteView truncated() const noexcept { return ByteView(truncated_.data(), n_); }
-  [[nodiscard]] ByteView wins() const noexcept { return ByteView(won_.data(), n_); }
-  [[nodiscard]] ByteView needs_reset() const noexcept { return ByteView(needs_reset_.data(), n_); }
-  [[nodiscard]] ByteView directions() const noexcept { return ByteView(dir_.data(), n_); }
+  [[nodiscard]] ByteView dones() const noexcept { return {done_.data(), n_}; }
+  [[nodiscard]] ByteView terminated() const noexcept { return {terminated_.data(), n_}; }
+  [[nodiscard]] ByteView truncated() const noexcept { return {truncated_.data(), n_}; }
+  [[nodiscard]] ByteView wins() const noexcept { return {won_.data(), n_}; }
+  [[nodiscard]] ByteView needs_reset() const noexcept { return {needs_reset_.data(), n_}; }
+  [[nodiscard]] ByteView directions() const noexcept { return {dir_.data(), n_}; }
 
   [[nodiscard]] bool check_invariants(int env) const;
   [[nodiscard]] bool check_all_invariants() const;
@@ -110,30 +102,30 @@ class VecSnakeImpl {
   void finish_step(int env, float reward, bool terminated, bool truncated, bool won) noexcept;
   void step_one(int env, int action) noexcept;
 
-  int resolve_direction(int env, int action) const noexcept;
+  [[nodiscard]] int resolve_direction(int env, int action) const noexcept;
   void clear_rows(int env) noexcept;
 
   std::uint16_t* body_slice(int env) noexcept { return body_.data() + idx(env) * idx(cells_); }
-  const std::uint16_t* body_slice(int env) const noexcept {
+  [[nodiscard]] const std::uint16_t* body_slice(int env) const noexcept {
     return body_.data() + idx(env) * idx(cells_);
   }
   std::uint64_t* row_slice(int env) noexcept { return rows_.data() + idx(env) * idx(height_); }
-  const std::uint64_t* row_slice(int env) const noexcept {
+  [[nodiscard]] const std::uint64_t* row_slice(int env) const noexcept {
     return rows_.data() + idx(env) * idx(height_);
   }
   std::uint8_t* obs_slice(int env) noexcept { return obs_.data() + idx(env) * 3 * idx(cells_); }
-  const std::uint8_t* obs_slice(int env) const noexcept {
+  [[nodiscard]] const std::uint8_t* obs_slice(int env) const noexcept {
     return obs_.data() + idx(env) * 3 * idx(cells_);
   }
 
   FreeCellSet free_cells(int env) noexcept {
     const std::size_t offset = idx(env) * idx(cells_);
-    return FreeCellSet(free_.data() + offset, free_pos_.data() + offset, &free_count_[idx(env)],
-                       cells_, width_);
+    return {free_.data() + offset, free_pos_.data() + offset, &free_count_[idx(env)], cells_,
+            width_};
   }
 
   GridObservation grid_observation(int env) noexcept {
-    return GridObservation(obs_.empty() ? nullptr : obs_slice(env), width_, height_);
+    return {obs_.empty() ? nullptr : obs_slice(env), width_, height_};
   }
 
   VecConfig config_;

@@ -15,13 +15,9 @@ constexpr std::uint16_t pack_cell(int x, int y) noexcept {
   return static_cast<std::uint16_t>((y << kCellShift) | x);
 }
 
-constexpr int cell_x(std::uint16_t cell) noexcept {
-  return cell & kCellMask;
-}
+constexpr int cell_x(std::uint16_t cell) noexcept { return cell & kCellMask; }
 
-constexpr int cell_y(std::uint16_t cell) noexcept {
-  return cell >> kCellShift;
-}
+constexpr int cell_y(std::uint16_t cell) noexcept { return cell >> kCellShift; }
 
 constexpr bool is_valid_cell(std::uint16_t cell, int width, int height) noexcept {
   return cell != kInvalidCell && cell_x(cell) < width && cell_y(cell) < height;

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <thread>
 
+#include "stacklog/stacklog.hpp"
+
 namespace snake::detail {
 namespace {
 
@@ -68,15 +70,19 @@ int resolve_total_threads(const VecConfig& config, int num_envs) noexcept {
 
 VecSnakeImpl::VecSnakeImpl(const VecConfig& config) : config_(config) {
   validate_config(config_);
+  // 构造是低频边界：这里打一条配置摘要，热路径（step/reset）一行都不打。
+  STACKLOG_INFO() << "vec_snake created envs=" << config_.num_envs << " grid=" << config_.width
+                  << "x" << config_.height << " threads=" << config_.num_threads
+                  << " seed=" << config_.seed;
 
   n_ = config_.num_envs;
   width_ = config_.width;
   height_ = config_.height;
   cells_ = width_ * height_;
 
-  const std::size_t env_count = static_cast<std::size_t>(n_);
-  const std::size_t cell_count = static_cast<std::size_t>(cells_);
-  const std::size_t row_count = static_cast<std::size_t>(height_);
+  const auto env_count = static_cast<std::size_t>(n_);
+  const auto cell_count = static_cast<std::size_t>(cells_);
+  const auto row_count = static_cast<std::size_t>(height_);
 
   rows_.assign(env_count * row_count, 0);
   body_.assign(env_count * cell_count, 0);
@@ -131,6 +137,7 @@ VecSnakeImpl::VecSnakeImpl(const VecConfig& config) : config_(config) {
 }
 
 void VecSnakeImpl::reseed_all(std::uint64_t seed) noexcept {
+  STACKLOG_INFO() << "vec_snake reseed_all seed=" << seed << " envs=" << n_;
   for (int env = 0; env < n_; ++env) {
     rng_[idx(env)].seed(seed + static_cast<std::uint64_t>(env));
   }
@@ -148,6 +155,7 @@ void VecSnakeImpl::reseed_env(int env, std::uint64_t seed) {
     throw std::out_of_range("environment index out of range");
   }
   rng_[idx(env)].seed(seed);
+  STACKLOG_DEBUG() << "vec_snake reseed_env env=" << env << " seed=" << seed;
   // Rebuild this environment from scratch for the same reason as reseed_all.
   init_env(env);
 }

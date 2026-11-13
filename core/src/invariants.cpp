@@ -4,11 +4,13 @@
 
 #include "detail/bitboard.hpp"
 #include "detail/engine.hpp"
+#include "stacklog/stacklog.hpp"
 
 namespace snake::detail {
 
 bool VecSnakeImpl::check_invariants(int env) const {
   if (env < 0 || env >= n_) {
+    STACKLOG_ERROR() << "invariants: env index out of range env=" << env;
     return false;
   }
 

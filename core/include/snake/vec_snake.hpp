@@ -53,13 +53,13 @@ class VecSnake {
 
   // The configuration captured at construction. Reseeding changes RNG state but
   // not this snapshot.
-  const VecConfig& config() const noexcept;
-  int num_envs() const noexcept;
-  int width() const noexcept;
-  int height() const noexcept;
-  int cells() const noexcept;
+  [[nodiscard]] const VecConfig& config() const noexcept;
+  [[nodiscard]] int num_envs() const noexcept;
+  [[nodiscard]] int width() const noexcept;
+  [[nodiscard]] int height() const noexcept;
+  [[nodiscard]] int cells() const noexcept;
   // Total threads including the caller; 1 means serial.
-  int active_threads() const noexcept;
+  [[nodiscard]] int active_threads() const noexcept;
 
   // final_* views are meaningful only for environments whose latest dones()
   // value is 1. They are not cleared by a manual reset. An empty view means the

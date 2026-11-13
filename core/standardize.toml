@@ -1,0 +1,17 @@
+# cxx_ci/standardize 配置 —— snake-drl 的 C++ 核心
+#
+# 在 core/ 目录运行：
+#     python3 ../../cxx_ci/standardize/standardize.py --check
+#     python3 ../../cxx_ci/standardize/standardize.py --apply
+
+[standardize]
+paths = ["src", "include", "tests", "benchmarks"]
+# 生成物与内嵌副本不参与排版：改了也会被下一次构建覆盖。
+exclude = ["build", "third_party", "ci-logs", "reports", "test-logs"]
+jobs = 24
+build_dir = "build/standardize"
+diff = "standardize.diff"
+stage_dir = ".standardize"
+auto_compile_commands = true
+tidy = true
+format = true

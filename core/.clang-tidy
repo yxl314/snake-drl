@@ -1,0 +1,42 @@
+---
+# 本项目是 C++17 的 CPU-only 库，启用现代化写法检查。
+#
+# 检查集：
+#   modernize-*   现代化改写（全面开启）
+#   bugprone-*    易错写法
+#   performance-* 明显的性能陷阱
+#   portability-* 平台可移植性
+#   cert-*        安全编码规则
+#   clang-analyzer-* 静态分析
+#
+# 只对显式豁免的项说明理由；其余一律按告警处理，一次改一条，不积累。
+#
+# 豁免项：
+#   bugprone-easily-swappable-parameters   本库有多个同类型坐标/尺寸参数
+#   bugprone-narrowing-conversions          int ↔ size_t 转换在本库是刻意的
+#   cert-err58-cpp                         静态局部对象的构造顺序与日志无关
+#   cert-msc32-c / cert-msc51-cpp          固定种子是设计要求（同 seed 必须复现）
+#   performance-enum-size                  枚举保持默认底层类型
+#   modernize-use-trailing-return-type     纯风格，与现有写法冲突
+#   modernize-use-std-print                需要 C++23，本项目是 C++17
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  cert-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -cert-msc32-c,
+  -cert-msc51-cpp,
+  -bugprone-narrowing-conversions,
+  -cert-err58-cpp,
+  -modernize-use-trailing-return-type,
+  -modernize-use-std-print,
+  -performance-enum-size
+
+# 只诊断本项目源码与头文件；内嵌的第三方库不进入结果。
+HeaderFilterRegex: '^(\./)?(include|src)/([^.]|\.[^./])'
+SystemHeaders: false
+FormatStyle: file

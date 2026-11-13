@@ -18,3 +18,11 @@ compile_commands.json
 *.dll
 runs/
 .DS_Store
+
+# 检查工具产生的目录与文件
+ci-logs/
+reports/
+test-logs/
+standardize.diff
+.standardize/
+logs/

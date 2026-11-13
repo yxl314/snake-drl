@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -45,7 +46,7 @@ const char* mode_name(snake::ObsMode mode) {
 // Same action stream for every mode/thread count within one (N, board) group,
 // so rows are directly comparable.
 std::uint64_t group_seed(const Case& c) {
-  const std::uint64_t base = static_cast<std::uint64_t>(0x9E3779B97F4A7C15ULL);
+  const auto base = static_cast<std::uint64_t>(0x9E3779B97F4A7C15ULL);
   const std::uint64_t envs = static_cast<std::uint64_t>(c.num_envs) * std::uint64_t{1000003};
   const std::uint64_t width = static_cast<std::uint64_t>(c.width) * std::uint64_t{7919};
   const std::uint64_t height = static_cast<std::uint64_t>(c.height) * std::uint64_t{104729};
@@ -140,17 +141,19 @@ Result measure(const Case& c) {
 }
 
 void print_result(const Case& c, const Result& r) {
-  char thread_label[32];
-  if (c.threads == 0) {
-    std::snprintf(thread_label, sizeof(thread_label), "%d (auto)", r.active_threads);
-  } else {
-    std::snprintf(thread_label, sizeof(thread_label), "%d", r.active_threads);
+  std::array<char, 32> thread_label{};
+  const int written =
+      c.threads == 0
+          ? std::snprintf(thread_label.data(), thread_label.size(), "%d (auto)", r.active_threads)
+          : std::snprintf(thread_label.data(), thread_label.size(), "%d", r.active_threads);
+  if (written < 0) {
+    thread_label[0] = '\0';
   }
   std::printf(
       "%-10s N=%-5d board=%dx%d threads=%-9s | %8.2f M env/s | "
       "%10.1f batch/s | %7.2f ns/env-step | done=%5.1f%%\n",
-      mode_name(c.obs), c.num_envs, c.width, c.height, thread_label, r.env_steps_per_sec / 1e6,
-      r.batch_steps_per_sec, r.ns_per_env_step, r.done_rate * 100.0);
+      mode_name(c.obs), c.num_envs, c.width, c.height, thread_label.data(),
+      r.env_steps_per_sec / 1e6, r.batch_steps_per_sec, r.ns_per_env_step, r.done_rate * 100.0);
 }
 
 void run_case(snake::ObsMode obs, int num_envs, int width, int height, int threads,
