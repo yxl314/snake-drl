@@ -3,7 +3,6 @@ import unittest
 from importlib.metadata import version as distribution_version
 
 import numpy as np
-
 from snake_drl import AutoresetMode, ObsMode, VecConfig, VecSnake, __version__
 from snake_drl.play.game import DOWN, LEFT, RIGHT, UP, GameSession
 

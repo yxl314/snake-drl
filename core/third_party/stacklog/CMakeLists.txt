@@ -5,6 +5,10 @@
 add_library(stacklog STATIC src/stacklog.cpp)
 add_library(snake::stacklog ALIAS stacklog)
 
+# 位置无关：本库有 thread_local 状态，snake_core 会被链进 Python 扩展 .so，
+# 非 PIC 的 TLS 会产生 local-exec 重定位，链接器拒绝。
+set_target_properties(stacklog PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 target_compile_features(stacklog PUBLIC cxx_std_11)
 
 target_include_directories(stacklog PUBLIC
@@ -12,6 +16,7 @@ target_include_directories(stacklog PUBLIC
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(stacklog PRIVATE -Wall -Wextra -Wpedantic)
+
 endif()
 
 find_package(Threads REQUIRED)

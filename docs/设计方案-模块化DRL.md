@@ -447,7 +447,7 @@ torch 的 `size mismatch` 堆栈。`eval` 不再接受单独的 `-c`（那会重
 | `test_algorithms.py` | DQN/DDQN 目标、截断 bootstrap、GAE vs 朴素实现、PER 回写、四算法在老虎机上收敛 |
 | `test_trainer.py` | 端到端训练、指标/评估/checkpoint 文件、断点恢复、步数上限、total_steps 一致性、eval 覆盖优先级 |
 
-共 85 个用例（4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
+共 104 个用例通过（另有 4 个"时序编码器需要 frames>=2"的预期跳过）。CI 级别的命令：
 
 ```bash
 pytest -q
@@ -665,3 +665,18 @@ snake-drl eval -m runs/<run>/latest.pt --episodes 20
   minibatch 可忽略。
 - **GAE 的 Python 时间循环向量化**：每次 iterate 一次，约 3 ms，对比数秒的更新可忽略。
 
+## 18. 可视化与展示
+
+训练产出读回与观战是两个独立模块，都不进入训练循环：
+
+- `report.py`：读 `metrics.jsonl`（非有限值已按 JSON 规范写成 `null`），控制台输出
+  各指标的 first/last/best，`plot_report` 画 return / episode length / loss /
+  诊断量四类面板。matplotlib 在函数内延迟导入（可选依赖 `.[plot]`），
+  所以纯文本摘要不装 matplotlib 也能用。
+- `play/agent.py`：把 checkpoint 的 greedy 策略接到单个环境上，复用 checkpoint
+  自带的 `env` 配置，`num_envs=1`、autoreset 关闭以保留终局画面；Qt 窗口
+  （`play/app.py`）与 GIF 录制（`play/record.py`，离屏渲染，不依赖 PyQt6）
+  驱动同一个 session 接口。
+- 两条 return 曲线语义不同：`train/episode_return` 是最近 100 个已结束训练回合
+  的均值（`runner.EPISODE_WINDOW`），`eval/return` 是每 `train.eval_every` 步
+  用固定 `train.eval_episodes` 局做的确定性评估。比较配置看后者。

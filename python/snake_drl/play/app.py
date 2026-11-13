@@ -7,12 +7,17 @@ Run with::
 
 Controls: arrow keys / WASD turn, space pauses, R restarts, +/- changes
 speed, Esc quits.
+
+Passing ``--model <checkpoint>`` switches to watch mode: a trained policy drives
+the same window, it starts by itself, and the arrow keys are ignored (space
+pauses, R restarts, +/- still changes the speed).
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+from typing import TYPE_CHECKING
 
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -28,6 +33,9 @@ from PyQt6.QtWidgets import (
 )
 
 from .game import DOWN, LEFT, RIGHT, UP, GameSession
+
+if TYPE_CHECKING:  # pragma: no cover - typing only; importing the agent pulls in torch
+    from .agent import AgentSession
 
 SPEEDS = (220, 180, 140, 110, 85, 65, 45)  # milliseconds per tick
 DEFAULT_SPEED = 3
@@ -47,7 +55,9 @@ COLOR_OVERLAY = QColor(5, 10, 20, 190)
 class BoardView(QWidget):
     """Paints the (3,H,W) observation planes."""
 
-    def __init__(self, session: GameSession, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, session: GameSession | AgentSession, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.session = session
         self.overlay = ""
@@ -144,14 +154,22 @@ class BoardView(QWidget):
 
 
 class GameWindow(QMainWindow):
-    def __init__(self, session: GameSession | None = None, speed_index: int = DEFAULT_SPEED) -> None:
+    def __init__(
+        self,
+        session: GameSession | AgentSession | None = None,
+        speed_index: int = DEFAULT_SPEED,
+        *,
+        agent_mode: bool = False,
+    ) -> None:
         super().__init__()
         self.session = session or GameSession()
+        self.agent_mode = agent_mode
         self.speed_index = max(0, min(len(SPEEDS) - 1, speed_index))
         self.started = False
         self.paused = False
 
-        self.setWindowTitle("贪吃蛇 · snake-drl")
+        title = "贪吃蛇 · snake-drl（智能体）" if agent_mode else "贪吃蛇 · snake-drl"
+        self.setWindowTitle(title)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self.board = BoardView(self.session)
@@ -159,7 +177,11 @@ class GameWindow(QMainWindow):
         self.score_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self._style_label(self.score_label, 14, bold=True)
 
-        self.hint_label = QLabel("方向键 / WASD 转向 · 空格 暂停 · R 重开 · +/- 调速 · Esc 退出")
+        if agent_mode:
+            hint = "R 重开 · 空格 暂停 · +/- 调速 · Esc 退出"
+        else:
+            hint = "方向键 / WASD 转向 · 空格 暂停 · R 重开 · +/- 调速 · Esc 退出"
+        self.hint_label = QLabel(hint)
         self._style_label(self.hint_label, 10, color=COLOR_MUTED)
 
         header = QHBoxLayout()
@@ -189,6 +211,9 @@ class GameWindow(QMainWindow):
 
         self._refresh_hud()
         self._refresh_overlay()
+        if agent_mode:
+            # Watch mode has nobody to press a key: let the policy play at once.
+            self._start()
 
     # ------------------------------------------------------------------ timer
 
@@ -229,11 +254,15 @@ class GameWindow(QMainWindow):
     def _restart(self) -> None:
         self.session.reset()
         self.timer.stop()
-        self.started = False
         self.paused = False
+        self.started = False
         self._refresh_hud()
         self._refresh_overlay()
         self.board.update()
+        if self.agent_mode:
+            # A watched agent restarts and keeps playing; nobody is there to
+            # press an arrow key to resume it.
+            self._start()
 
     def _change_speed(self, delta: int) -> None:
         new_index = max(0, min(len(SPEEDS) - 1, self.speed_index + delta))
@@ -248,14 +277,20 @@ class GameWindow(QMainWindow):
 
     def _refresh_hud(self) -> None:
         s = self.session
-        self.score_label.setText(f"得分 {s.score}    长度 {s.length}    步数 {s.steps}")
+        if self.agent_mode:
+            # The agent session formats its own one-line status; it knows the
+            # score/length/step counters the policy is actually producing.
+            self.score_label.setText(s.episode_label)
+        else:
+            self.score_label.setText(f"得分 {s.score}    长度 {s.length}    步数 {s.steps}")
         self.speed_label.setText(f"速度 {self.speed_index + 1}/{len(SPEEDS)}")
 
     def _refresh_overlay(self) -> None:
         if self.session.game_over:
             text = "你赢了！按 R 重新开始" if self.session.won else "游戏结束 · 按 R 重新开始"
         elif not self.started:
-            text = "按方向键或空格开始"
+            # Watch mode starts by itself; the human mode needs a key press.
+            text = "" if self.agent_mode else "按方向键或空格开始"
         elif self.paused:
             text = "已暂停 · 空格继续"
         else:
@@ -290,14 +325,17 @@ class GameWindow(QMainWindow):
         }
 
         if key in directions:
-            if not self.started:
-                self._start()
-            if self.paused:
-                self.paused = False
-                self.timer.start(SPEEDS[self.speed_index])
-                self._refresh_overlay()
-            self.session.turn(directions[key])
-            self.board.update()
+            # Watch mode ignores steering: the policy chooses the moves, so the
+            # arrow keys are swallowed instead of reaching the session.
+            if not self.agent_mode:
+                if not self.started:
+                    self._start()
+                if self.paused:
+                    self.paused = False
+                    self.timer.start(SPEEDS[self.speed_index])
+                    self._refresh_overlay()
+                self.session.turn(directions[key])
+                self.board.update()
             event.accept()
             return
 
@@ -331,9 +369,20 @@ class GameWindow(QMainWindow):
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Play snake with the snake-drl core.")
-    parser.add_argument("--width", type=int, default=16, help="board width (3-64)")
-    parser.add_argument("--height", type=int, default=16, help="board height (3-64)")
+    parser.add_argument(
+        "--width", type=int, default=16, help="board width (3-64); ignored with --model"
+    )
+    parser.add_argument(
+        "--height", type=int, default=16, help="board height (3-64); ignored with --model"
+    )
     parser.add_argument("--seed", type=int, default=None, help="RNG seed")
+    parser.add_argument(
+        "-m",
+        "--model",
+        default=None,
+        metavar="CKPT",
+        help="watch a trained checkpoint instead of playing yourself",
+    )
     parser.add_argument(
         "--speed",
         type=int,
@@ -351,11 +400,25 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(sys.argv[:1])
     app.setApplicationName("snake-drl play")
 
-    session = GameSession(width=args.width, height=args.height, seed=args.seed)
-    window = GameWindow(session, speed_index=args.speed - 1)
+    session: GameSession | AgentSession
+    if args.model is not None:
+        # Imported lazily so human play keeps starting on a machine where the
+        # training layer (and therefore torch) is not installed.
+        from .agent import AgentSession
+
+        session = AgentSession(args.model, seed=args.seed)
+    else:
+        session = GameSession(width=args.width, height=args.height, seed=args.seed)
+
+    window = GameWindow(session, speed_index=args.speed - 1, agent_mode=args.model is not None)
     window.resize(620, 700)
     window.show()
-    return app.exec()
+    try:
+        return app.exec()
+    finally:
+        if args.model is not None:
+            # The agent session owns an engine thread pool; release it.
+            session.close()
 
 
 if __name__ == "__main__":

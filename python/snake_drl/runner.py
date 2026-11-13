@@ -21,6 +21,7 @@ next :meth:`step`/:meth:`reset`.
 from __future__ import annotations
 
 import warnings
+from collections import deque
 from dataclasses import dataclass
 
 import numpy as np
@@ -33,6 +34,11 @@ from .envs import StepResult, VectorEnv
 warnings.filterwarnings("ignore", message="The given NumPy array is not writable")
 
 __all__ = ["StepBatch", "VectorRunner"]
+
+# How many finished episodes the training curve averages over. 100 is the
+# usual choice: long enough to smooth the noise of a 256-env batch, short
+# enough to react within a fraction of a training run.
+EPISODE_WINDOW = 100
 
 
 @dataclass(frozen=True)
@@ -71,6 +77,15 @@ class VectorRunner:
         self.num_envs = env.num_envs
         self.obs_spec = env.obs_spec
         self.action_spec = env.action_spec
+
+        # Episode bookkeeping for the training curve. Kept here because the
+        # runner is the only component that sees every reward and every done;
+        # algorithms stay free of statistics code. The ring holds the most
+        # recent finished episodes, which is what a smoothed curve needs.
+        self._ep_return = np.zeros(self.num_envs, dtype=np.float64)
+        self._ep_length = np.zeros(self.num_envs, dtype=np.int64)
+        self._finished_returns: deque[float] = deque(maxlen=EPISODE_WINDOW)
+        self._finished_lengths: deque[int] = deque(maxlen=EPISODE_WINDOW)
 
         dtype = torch_dtype(env.obs_spec)
         frame_shape = (self.num_envs, *env.obs_spec.shape)
@@ -161,6 +176,10 @@ class VectorRunner:
     def reset(self) -> torch.Tensor:
         """Reset every environment and return the first window."""
         self._require_open()
+        # A reset starts a new stream: partial episodes from the old one are
+        # not comparable and must not leak into the curve.
+        self._ep_return.fill(0.0)
+        self._ep_length.fill(0)
         frame = torch.from_numpy(self.env.reset())
         if self.frames == 1:
             self._frame.copy_(frame)
@@ -183,6 +202,7 @@ class VectorRunner:
             raise ValueError(f"expected {self.num_envs} actions, got shape {actions_np.shape}")
         result = self.env.step(actions_np)
         done = np.logical_or(result.terminated, result.truncated)
+        self._record_episodes(result.reward, done)
 
         obs = self.obs
         self._upload(result.obs, self._frame_alt)
@@ -221,6 +241,38 @@ class VectorRunner:
             terminated=self._terminated,
             truncated=self._truncated,
         )
+
+    def _record_episodes(self, reward: np.ndarray, done: np.ndarray) -> None:
+        """Accumulate per-environment episode statistics.
+
+        Cheap by construction: two vector adds per step, and the Python loop
+        only runs for the environments that finished this step. It has to
+        happen on every step -- a finished episode's total is only known at
+        the moment it finishes.
+        """
+        self._ep_return += reward
+        self._ep_length += 1
+        if not done.any():
+            return
+        for env in np.flatnonzero(done):
+            self._finished_returns.append(float(self._ep_return[env]))
+            self._finished_lengths.append(int(self._ep_length[env]))
+        self._ep_return[done] = 0.0
+        self._ep_length[done] = 0
+
+    def episode_stats(self) -> dict[str, float]:
+        """Mean return/length over the recent finished episodes.
+
+        Returns an empty dict until at least one episode has finished, so the
+        first logged record has no half-formed zeros in it.
+        """
+        if not self._finished_returns:
+            return {}
+        return {
+            "train/episode_return": float(np.mean(self._finished_returns)),
+            "train/episode_length": float(np.mean(self._finished_lengths)),
+            "train/episodes": float(len(self._finished_returns)),
+        }
 
     def _reset_window_rows(self, done: np.ndarray) -> None:
         """Overwrite the whole window of the finished environments."""

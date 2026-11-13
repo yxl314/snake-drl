@@ -28,21 +28,25 @@ python/snake_drl/     engine re-export, DRL layer and play mode
   algorithms/         PPO, DQN family, GAE, schedules
   runner.py           the only component that talks to an environment; StepBatch
   trainer/            trainer loop, evaluator, logger, checkpoints, factory
-  cli.py              `snake-drl train|eval|play|bench`
+  cli.py              `snake-drl train|eval|play|report|bench`
+  report.py           training metrics -> console summary + PNG report
 configs/              example YAML configs
 docs/                 design document (Chinese) with benchmark data
 tests/                pytest suite (CPU, ~2 min)
+check.sh              repo gate: core + pytest + ruff (`all|core|python|lint`)
 ```
 
 ## Build
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[play,dev]"
+pip install -e ".[plot,play,dev]"
 ```
 
-`pip install -e .` compiles the C++ engine through scikit-build-core. Re-run it
-after changing `core/` or `bindings/`.
+The extras are optional: `plot` adds matplotlib/Pillow for report charts, `play`
+adds PyQt6 for the watch window, `dev` adds pytest, ruff and mypy. `pip install
+-e .` alone is enough to train. Any `-e` install compiles the C++ engine through
+scikit-build-core; re-run it after changing `core/` or `bindings/`.
 
 ## Train
 
@@ -70,6 +74,42 @@ snake-drl bench -c configs/d3qn_cnn.yaml
 # play yourself
 snake-play
 ```
+
+## Visualize
+
+`snake-drl report` reads a run's `metrics.jsonl` and prints a table of
+first/last/best values per metric. With matplotlib installed (`.[plot]`) it also
+writes a four-panel PNG: return, episode length, loss, and whatever diagnostics
+the run logged (entropy, Q values, KL). The text summary never needs matplotlib;
+`--no-chart` skips the image explicitly.
+
+```bash
+pip install -e ".[plot]"
+snake-drl report runs/<dir>                 # -> runs/<dir>/report.png
+snake-drl report runs/<dir> -o out.png      # write the chart elsewhere
+snake-drl report runs/<dir> --no-chart      # summary table only
+```
+
+The return panel carries two curves that are easy to confuse.
+`train/episode_return` is a rolling mean over the last 100 *finished* training
+episodes (the report smooths it further across log records so the trend is
+readable), while `eval/return` is a deterministic evaluation over
+`train.eval_episodes` episodes every `train.eval_every` steps, drawn as sparse
+points. Compare runs by the eval curve; read the training curve to see progress
+between evaluations.
+
+`play` can hand the controls to a trained checkpoint instead of a human:
+
+```bash
+# watch the greedy policy in a PyQt6 window (needs the .[play] extra)
+snake-drl play --model runs/<dir>/latest.pt
+
+# render offscreen to an animated GIF; no window, no PyQt6, just Pillow
+snake-drl play --model runs/<dir>/latest.pt --record demo.gif --episodes 3
+```
+
+`--episodes` applies to `--record` and defaults to 3. Without `--model`,
+`snake-drl play` is still the human game.
 
 ## Design in one paragraph
 
@@ -141,11 +181,15 @@ Measured on an 8-vCPU aarch64 box (details in the design document):
 ## Tests and code quality
 
 ```bash
-pytest -q                                    # 85 tests, CPU, ~2-5 min
+pytest -q                                    # 104 tests, CPU, ~15 s
 ruff check python/snake_drl tests            # E,F,W,I,UP,B,SIM
 ruff format --check python/snake_drl tests --exclude python/snake_drl/play
 mypy python/snake_drl                        # 49 files, Qt front-end excluded
 ```
+
+From the repository root, `./check.sh [all|core|python|lint]` runs the Python
+suite, ruff (skipped when it is not installed) and `core/check.sh all` behind one
+per-stage summary; it needs the `.venv` created in *Build*.
 
 Covers config validation (strict unknown-key rejection, override precedence), all
 six encoders, policy/head math, buffer wraparound, prioritized-sampling

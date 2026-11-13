@@ -54,6 +54,19 @@ def _build_parser() -> argparse.ArgumentParser:
     play.add_argument("--height", type=int, default=16)
     play.add_argument("--seed", type=int, default=None)
     play.add_argument("--speed", type=int, default=4)
+    play.add_argument("-m", "--model", default=None,
+                      help="watch a trained checkpoint instead of playing yourself")
+    play.add_argument("--record", default=None, metavar="GIF",
+                      help="render the agent to a GIF and exit (no window, no PyQt6)")
+    play.add_argument("--episodes", type=int, default=3,
+                      help="episodes to record (with --record); default: 3")
+
+    report = sub.add_parser("report", help="summarise a run and draw its curves")
+    report.add_argument("run", help="run directory or metrics.jsonl")
+    report.add_argument(
+        "-o", "--out", default=None, help="output image (default: <run>/report.png)"
+    )
+    report.add_argument("--no-chart", action="store_true", help="print the summary only")
 
     bench = sub.add_parser("bench", help="measure env + policy throughput")
     bench.add_argument("-c", "--config", required=True, help="YAML config file")
@@ -110,6 +123,21 @@ def cmd_eval(args: argparse.Namespace) -> int:
 
 
 def cmd_play(args: argparse.Namespace) -> int:
+    # Recording renders offscreen and must not depend on PyQt6 being installed.
+    if args.record is not None:
+        if args.model is None:
+            print("--record needs --model: there is nothing to record otherwise", file=sys.stderr)
+            return 2
+        from .play.record import record
+
+        try:
+            path = record(args.model, args.record, episodes=args.episodes)
+        except (ValueError, FileNotFoundError) as exc:
+            print(f"record failed: {exc}", file=sys.stderr)
+            return 2
+        print(f"recorded: {path}")
+        return 0
+
     from .play.app import main as play_main
 
     argv = [
@@ -122,7 +150,41 @@ def cmd_play(args: argparse.Namespace) -> int:
     ]
     if args.seed is not None:
         argv += ["--seed", str(args.seed)]
+    if args.model is not None:
+        argv += ["--model", args.model]
+        from pathlib import Path
+
+        if not Path(args.model).is_file():
+            print(f"checkpoint not found: {args.model}", file=sys.stderr)
+            return 2
     return play_main(argv)
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    from .report import (
+        format_summary,
+        load_metrics,
+        plot_report,
+        resolve_metrics_path,
+        summarize,
+    )
+
+    metrics_path = resolve_metrics_path(args.run)
+    rows = load_metrics(metrics_path)
+    summary = summarize(rows)
+    print(f"metrics : {metrics_path}")
+    print(f"records : {len(rows)}")
+    table = format_summary(summary)
+    if table:
+        print(table)
+    else:
+        print("no metrics to summarise")
+    if args.no_chart or not rows:
+        return 0
+    out = args.out or str(metrics_path.parent / "report.png")
+    written = plot_report(rows, out, title=str(metrics_path.parent.name))
+    print(f"chart   : {written}")
+    return 0
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -175,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
         "train": cmd_train,
         "eval": cmd_eval,
         "play": cmd_play,
+        "report": cmd_report,
         "bench": cmd_bench,
     }
     return handlers[args.command](args)

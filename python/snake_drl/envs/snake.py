@@ -21,13 +21,27 @@ from .registry import ENVS
 _RELATIVE_ACTIONS = 3  # straight, right, left
 _ABSOLUTE_ACTIONS = 4  # up, right, down, left
 
-__all__ = ["SnakeVecEnv", "make_snake"]
+__all__ = ["SnakeVecEnv", "make_snake", "make_snake_demo"]
 
 
 class SnakeVecEnv(VectorEnv):
-    """Batched snake games driven with the engine's ``SameStep`` autoreset."""
+    """Batched snake games driven with the engine's ``SameStep`` autoreset.
 
-    def __init__(self, cfg: EnvConfig, seed: int | None = None) -> None:
+    Args:
+        cfg: Environment configuration.
+        seed: Overrides ``cfg.seed`` when given.
+        autoreset: Engine autoreset mode. Training wants ``SameStep`` (a finished
+            episode is replaced inside the same step, so no transition is lost);
+            a demo wants ``Disabled`` (the terminal state stays on screen).
+    """
+
+    def __init__(
+        self,
+        cfg: EnvConfig,
+        seed: int | None = None,
+        *,
+        autoreset: AutoresetMode | None = None,
+    ) -> None:
         if cfg.obs_mode != "grid":
             raise ValueError(
                 f"snake obs_mode={cfg.obs_mode!r} is not supported by the training adapter; "
@@ -51,7 +65,7 @@ class SnakeVecEnv(VectorEnv):
         vec.step_penalty = cfg.step_penalty
         vec.win_bonus = cfg.win_bonus
         vec.relative_actions = cfg.action_mode == "relative"
-        vec.autoreset_mode = AutoresetMode.SameStep
+        vec.autoreset_mode = AutoresetMode.SameStep if autoreset is None else autoreset
         vec.obs_mode = ObsMode.Grid
         vec.seed = cfg.seed if seed is None else seed
         vec.num_threads = cfg.num_threads
@@ -102,3 +116,12 @@ class SnakeVecEnv(VectorEnv):
 @register(ENVS, "snake")
 def make_snake(cfg: EnvConfig, *, seed: int | None = None) -> SnakeVecEnv:
     return SnakeVecEnv(cfg, seed=seed)
+
+
+def make_snake_demo(cfg: EnvConfig, *, seed: int | None = None) -> SnakeVecEnv:
+    """Snake environment that keeps the terminal state on screen.
+
+    Used by watch/record mode: with ``SameStep`` the engine resets inside the
+    terminal step, so the frame that killed the snake is never rendered.
+    """
+    return SnakeVecEnv(cfg, seed=seed, autoreset=AutoresetMode.Disabled)

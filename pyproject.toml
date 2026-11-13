@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 play = ["PyQt6>=6.5"]
+plot = ["matplotlib>=3.7", "pillow>=10"]
 tensorboard = ["tensorboard>=2.13"]
 dev = ["pytest>=7.4", "mypy>=1.8", "ruff>=0.6"]
 

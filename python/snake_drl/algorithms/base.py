@@ -52,8 +52,14 @@ class Algorithm(ABC):
 
     # ------------------------------------------------------------------ core
     def iterate(self) -> dict[str, float]:
-        """One collect + learn cycle."""
+        """One collect + learn cycle.
+
+        Episode statistics are merged here rather than in each algorithm: the
+        runner already sees every reward, and both PPO and DQN need the same
+        curve.
+        """
         metrics = self._iterate()
+        metrics.update(self.runner.episode_stats())
         self.iterations += 1
         return metrics
 

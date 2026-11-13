@@ -97,6 +97,12 @@ bool regular_file_size(const std::string& path, std::uint64_t& size)
 /// 以追加方式重新打开当前日志文件，并从实际文件大小恢复写入计数。
 bool open_append_locked(logger_state& logger)
 {
+    // 写失败后 ready=false，但流可能仍是打开状态；basic_filebuf::open()
+    // 不允许对已打开的流再次 open，不先 close 的话重试永远不会成功。
+    if (logger.file.is_open())
+    {
+        logger.file.close();
+    }
     logger.file.clear();
     logger.file.open(logger.path.c_str(), std::ios::out | std::ios::app | std::ios::binary);
     if (!logger.file.is_open())
