@@ -179,8 +179,11 @@ void VecSnakeImpl::step_one(int env, int action) noexcept {
 
   const int x = cell_x(head_[idx(env)]);
   const int y = cell_y(head_[idx(env)]);
-  const int next_x = x + kDx[direction];
-  const int next_y = y + kDy[direction];
+  // direction 在上一行由 resolve_direction 保证落在 [0, 4)，这里显式转成
+  // 下标类型，避免 -Wsign-conversion 把 int 到 size_type 的转换当成可疑操作。
+  const auto dir_index = static_cast<std::array<int, 4>::size_type>(direction);
+  const int next_x = x + kDx[dir_index];
+  const int next_y = y + kDy[dir_index];
 
   if (static_cast<unsigned>(next_x) >= static_cast<unsigned>(width_) ||
       static_cast<unsigned>(next_y) >= static_cast<unsigned>(height_)) {
