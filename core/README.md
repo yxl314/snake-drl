@@ -35,6 +35,31 @@ Debug, UBSan, ASan and TSan presets are in `CMakePresets.json`. The extended
 warning set (`-Wconversion`, `-Wsign-conversion`, ...) is on by default;
 `release-werror` additionally treats warnings as errors.
 
+## 门禁
+
+```bash
+./check.sh          # 等价于 ./check.sh all
+./check.sh ci       # 构建 + ctest
+./check.sh style    # clang-format / clang-tidy 排版检查
+./check.sh audit    # clang-tidy + CPD + Valgrind
+```
+
+三个工具来自同级目录（`../../cxx_ci`、`../../cxx_audit`），不安装到系统。
+`JOBS=` 可覆盖并行度，缺省为本机核数。
+
+检查集在 `.clang-tidy` 里，`modernize-*` 全面启用；本项目是 C++17，链接期
+相关检查按该标准配置。
+
+## 日志
+
+`third_party/stacklog` 是上游副本，随仓库分发。日志是**内部实现细节**：
+`snake_core` 以 PRIVATE 方式静态链接它，公开头文件不含 stacklog，库本身也
+从不调用 `stacklog::init()`——由消费者（测试、训练/评估程序、绑定）决定
+日志目录与级别。
+
+只在低频边界打日志：构造、重播种、不定点检查失败。`step`/`reset*`、位棋盘
+与食物采样等热路径一行都不打。
+
 ## Layout
 
 ```text
