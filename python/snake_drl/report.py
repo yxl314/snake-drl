@@ -37,7 +37,7 @@ PANELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("episode return", ("train/episode_return", "eval/return")),
     ("episode length", ("train/episode_length",)),
     ("loss", ("loss", "policy_loss", "value_loss")),
-    ("diagnostics", ("entropy", "q_mean", "approx_kl")),
+    ("diagnostics", ("entropy", "q_mean")),
 )
 
 # Metrics where a smaller value is better. The summary reports "best" as the
@@ -251,8 +251,8 @@ def plot_report(
                 continue
             is_eval = key.startswith("eval/")
             # Evaluation points are sparse: draw them as markers so they read as
-            # checkpoints rather than as a second, jagged training curve.
-            # A single record draws no visible line; give short series markers.
+            # checkpoints rather than as a second, jagged training curve. A
+            # single record draws no visible line either, so keep the marker.
             marker = "o" if (is_eval or len(xs) <= 2) else None
             if is_eval:
                 ax.plot(xs, ys, marker="o", markersize=3, linewidth=1.2, label=key)

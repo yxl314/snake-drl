@@ -178,3 +178,25 @@ def test_plot_report_without_matplotlib_raises_import_error(tmp_path, monkeypatc
     monkeypatch.setitem(sys.modules, "matplotlib", None)
     with pytest.raises(ImportError, match="matplotlib is required"):
         plot_report([{"step": 0, "loss": 1.0}], tmp_path / "chart.png")
+
+
+def test_panels_declare_only_known_keys():
+    """面板引用的指标键必须是训练真的会写出来的键。
+
+    面板里写错一个键名的后果是"这一格永远空白"，不会报错——所以用清单锁住。
+    """
+    from snake_drl.report import PANELS
+
+    known = {
+        "train/episode_return",
+        "train/episode_length",
+        "eval/return",
+        "loss",
+        "policy_loss",
+        "value_loss",
+        "entropy",
+        "q_mean",
+    }
+    for _title, keys in PANELS:
+        for key in keys:
+            assert key in known, f"panel references unknown metric {key!r}"
