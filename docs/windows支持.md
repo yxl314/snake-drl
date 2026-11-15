@@ -83,19 +83,40 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
 
 ## 5. 已知限制
 
-- **clang-tidy 版本**：门禁按 21.x 校准（Windows 验证用 PyPI
-  `clang-tidy==21.1.6`，Linux 用 21.1.8；更早的 17.0.6 也验证过）。MSYS2 UCRT64
-  自带的是 23.1.5，其新增/收紧的检查会报 24 条版本差异告警，不能用于本门禁。
+- **clang 工具版本必须与门禁基线对齐**：基线是 clang-tidy/clang-format
+  **21.1.8**（Linux 系统版本；Windows 用 PyPI 同系列 `clang-tidy==21.1.6` +
+  `clang-format==21.1.8`）。安装命令：
+
+  ```powershell
+  .venv\Scripts\pip install clang-tidy==21.1.6 clang-format==21.1.8
+  ```
+
+  并且 Python 的 `Scripts` 目录要在 `PATH` 中排在 MSYS2 之前（否则会解析到
+  MSYS2 UCRT64 自带的 **23.1.5**）。23.1.5 新增/收紧了若干检查，与基线差异明显
+  （历史实测会产生 24 条版本差异告警），**不能用于本门禁**。版本 pin 就记在这里，
+  不额外加 requirements 文件。
 - **CPD/Valgrind**：CPD 在 Windows 上可用，但要求 `pmd` 与 `java` 都在 `PATH`
   （PMD 的 `pmd.bat` 只认 PATH 里的 java，`JAVA_HOME` 无效）；Valgrind 没有原生
   Windows 版本，cxx_audit 会 SKIPPED 并打印原因。`audit.toml` 里的 ASan 仍是项目级
   关闭状态（原环境限制），本次未改变该决定。
 - **MSVC 未验证**：构建验证使用 MSYS2 UCRT64 的 MinGW-w64 g++；CMake 与内嵌
   stacklog 保留了 MSVC 分支（`/W4 /utf-8`），但没有真机跑过。
-- **PyQt6 窗口**：PyQt6 6.12.1 可以安装并 import；本机是 SSH 无桌面环境，只做了
-  offscreen 冒烟，真实窗口交互未验证。
+- **PyQt6 真实窗口交互未验证**：PyQt6 6.12.1 可以安装并 import，`QT_QPA_PLATFORM=offscreen`
+  下能成功创建 `QApplication`；但验证机是 SSH 无桌面环境，`snake-drl play` 的真实
+  窗口显示、方向键/暂停/重开等交互没有在 Windows 桌面上跑过。
 - **中文路径**：验证目录使用 ASCII 路径；`stacklog` 上游已支持含中文路径的 UTF-8
   约定，但本仓库没有在中文工作目录下重新验证 C++ 构建。
+
+### 历史记录（已修复，保留追溯）
+
+- `d95dc45`：Windows tidy 曾报 2 条 `bugprone-exception-escape` 伪告警——PyPI
+  clang-tidy 默认 target 是 MSVC，分析 MinGW 构建时按 MSVC STL 推断异常路径。
+- cxx_audit `f830277` 自动为 MinGW 编译数据库补 `--target` 后，上述 2 条消失，但
+  又暴露出 4 条 `clang-analyzer` 伪告警（MinGW/UCRT 的 assert 失败函数缺 noreturn
+  标注）。
+- `db00cd1`：加入 `core/cmake/analysis_mingw_assert.h` 的 noreturn 声明补丁后，
+  tidy 变成 `0 个错误，0 个警告`；最终 `python check.py all` 退出码 0。以上两轮
+  历史失败均不再是现状，仅作追溯保留。
 
 ## 6. 验证记录
 
