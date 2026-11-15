@@ -100,22 +100,27 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
 
 ## 6. 验证记录
 
+Windows 侧从 `git archive HEAD` 部署到干净目录（ASCII 路径、空 venv）实测：
+
 ```powershell
-# check.py all（Windows 11，干净 git archive 部署）
-python check.py all
+# 铺开：python -m venv .venv
+#       pip install torch（CPU 轮子）+ matplotlib/pillow/ruff/pytest/PyQt6
+#       pip install -e .                 # MinGW 构建 core + 扩展
+# 实测耗时：113 s（含首次下载/编译）
+python check.py all                     # 实测 96 s
 ```
 
 关键输出（节选）：
 
 ```text
-[ci]   configure  ok       5.67s
-[ci]   build      ok       2.53s
-[ci]   test       ok       2.23s        # ctest 1/1 passed, snake_core_tests
+[ci]   configure  ok       4.62s
+[ci]   build      ok       1.94s
+[ci]   test       ok       1.43s        # ctest 1/1 passed, snake_core_tests
 [standardize] processed: 28  changed: 0  unchanged: 28  failed: 0
 [FAIL] tidy: 14 个文件，0 个错误，2 个警告      # 见 §5
 [OK] cpd: 退出码=0，重复=否
 [SKIPPED] valgrind: Windows 上没有原生 Valgrind ...
-105 passed, 4 skipped in 19.96s
+105 passed, 4 skipped in 26.12s
 All checks passed!                              # ruff
 [check] summary:
   core: FAILED
@@ -123,4 +128,12 @@ All checks passed!                              # ruff
   lint: passed
 ```
 
-Linux 回归：`./check.sh all` 在改动后仍然全绿（core / python / lint 三项 passed）。
+扩展模块自包含验证：`objdump -p _snake_core.cp314-win_amd64.pyd` 的依赖只有
+`KERNEL32.dll`、系统 UCRT `api-ms-win-crt-*.dll` 和 `python314.dll`；把 `PATH` 清到
+只剩 `C:\Windows\System32;C:\Windows` 后 `import snake_drl` 仍然成功。
+
+PyQt6 6.12.1 / Qt 6.12.0 在 `QT_QPA_PLATFORM=offscreen` 下可以创建
+`QApplication`；SSH 无桌面，真实窗口交互未验证。
+
+Linux 回归：`./check.sh all` 在改动后仍然全绿（core / python / lint 三项 passed，
+clang-tidy/format 21.1.8 与 17.0.6 都验证过 0 告警）。
