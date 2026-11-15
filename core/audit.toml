@@ -23,6 +23,16 @@ enabled = true
 report = "reports/clang-tidy.txt"
 fail_on_warnings = true
 jobs = 24
+# MinGW/UCRT 的 assert 失败函数（_assert/_wassert）在头文件里没有 noreturn
+# 标注，clang-analyzer 会把 assert 之后的代码当成可达路径，产生空指针解引用
+# 之类的假告警。该强制包含头只给 clang 分析补声明属性；内容按 _WIN32 +
+# __clang__ 收口，普通编译与 POSIX 分析都不受影响。
+#
+# clang-tidy 按编译数据库里的 directory（build/audit，项目根下两级）解析相对
+# include 路径，所以这里用 ../../cmake；改 [project].build_dir 的深度时要同步。
+extra_args = ["--extra-arg=-I../../cmake",
+              "--extra-arg=-include",
+              "--extra-arg=analysis_mingw_assert.h"]
 
 [cpd]
 enabled = true

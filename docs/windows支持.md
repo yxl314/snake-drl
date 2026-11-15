@@ -10,15 +10,15 @@
 |---|---|---|---|
 | `check.py core`（构建 + ctest） | ✅ | ✅ | MinGW-w64 g++ 16.2 + Ninja；ctest 1/1 通过 |
 | `check.py core`（排版 standardize） | ✅ | ✅ | 28 个文件 0 改动 |
-| `check.py core`（clang-tidy） | ✅ | ⚠️ 2 条工具链伪告警 | 见 §5；PyPI 的 clang-tidy 21 是 MSVC target，分析 MinGW 构建时按 MSVC STL 推断 |
+| `check.py core`（clang-tidy） | ✅ | ✅ | cxx_audit 自动检测 MinGW 并补 `--target`；项目侧补 assert noreturn 声明，0 告警 |
 | `check.py core`（CPD） | ✅ | ✅ | PMD 7.29.0 + JRE 21 真跑，无重复 |
 | `check.py core`（Valgrind） | ✅ | ⚠️ SKIPPED | Valgrind 没有 Windows 版本，cxx_audit 打印原因后跳过 |
 | `check.py python` | ✅ | ✅ | pytest 105 passed / 4 skipped |
 | `check.py lint` | ✅ | ✅ | ruff 全部通过 |
 | 扩展模块 import | ✅ | ✅ | `.pyd` 静态链接 MinGW 运行时，不依赖 MSYS2 PATH |
 
-一句话结论：**除 clang-tidy 的 2 条版本/目标平台相关伪告警外，Windows 上全部通过**；
-`check.py all` 在 Windows 上会如实以 1 退出（tidy 一项失败），其余阶段都是绿的。
+一句话结论：**Windows 上与 Linux 一致——core（构建/ctest/排版/clang-tidy/CPD）、
+python、lint 全部通过；Valgrind 因平台不适用 SKIPPED。`python check.py all` 退出 0。**
 
 ## 2. 已验证环境
 
@@ -72,21 +72,20 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
    `clang-analyzer-optin.core.EnumCastOutOfRange` 会误报。加了带理由的
    `NOLINTNEXTLINE`（Linux 同版本也会报这两条，与 Windows 无关），不放宽
    `.clang-tidy` 的检查集。
+5. **clang-tidy 的 MinGW 适配**：cxx_audit ≥ `87fb102` 会从编译数据库自动检测
+   MinGW/GCC，给 clang-tidy 追加 `--target=x86_64-w64-windows-gnu`
+   `--gcc-toolchain=<ucrt64>`，并生成一份剔除 GCC 私有参数的数据库。但 MinGW/UCRT
+   的 `assert` 失败函数（`_assert` / `_wassert`）声明缺少 noreturn，clang-analyzer
+   会把 assert 失败当成继续执行，误报空指针解引用/未定义返回。仓库侧新增
+   `core/cmake/analysis_mingw_assert.h`（只在 `_WIN32 && __clang__` 下补声明属性），
+   由 `core/audit.toml` 的 `[tidy].extra_args` 强制包含；普通编译（g++/MSVC）与
+   POSIX 分析都不受影响。
 
 ## 5. 已知限制
 
-- **clang-tidy 的目标平台**：PyPI 的 `clang-tidy==21.1.6` 是 MSVC target 的官方
-  Windows 构建。分析 MinGW 构建的编译数据库时，它会按 MSVC STL 推断异常路径，产生
-  2 条与构建无关的 `bugprone-exception-escape`：
-  - `src/engine.cpp:139`（`VecSnakeImpl::reseed_all`）
-  - `tests/test_main.cpp:7`（`main`）
-
-  给 clang-tidy 加 `--extra-arg=--target=x86_64-w64-windows-gnu` 后这两条消失，
-  说明是分析器目标平台不匹配，而不是代码问题（同一份代码在 Linux clang-tidy
-  21.1.8 下 0 告警）。门禁**如实以 FAIL 记录**，没有为此改 `.clang-tidy`、没有加
-  wrapper。根治方式：给 cxx_audit 增加按调用透传 clang-tidy 参数的入口
-  （如 `--tidy-extra-arg`），或在 CI 里使用 MinGW target 的 clang-tidy；两者都需要
-  改动工具仓库，不在本仓库范围内。
+- **clang-tidy 版本**：门禁按 21.x 校准（Windows 验证用 PyPI
+  `clang-tidy==21.1.6`，Linux 用 21.1.8；更早的 17.0.6 也验证过）。MSYS2 UCRT64
+  自带的是 23.1.5，其新增/收紧的检查会报 24 条版本差异告警，不能用于本门禁。
 - **CPD/Valgrind**：CPD 在 Windows 上可用，但要求 `pmd` 与 `java` 都在 `PATH`
   （PMD 的 `pmd.bat` 只认 PATH 里的 java，`JAVA_HOME` 无效）；Valgrind 没有原生
   Windows 版本，cxx_audit 会 SKIPPED 并打印原因。`audit.toml` 里的 ASan 仍是项目级
@@ -107,25 +106,33 @@ Windows 侧从 `git archive HEAD` 部署到干净目录（ASCII 路径、空 ven
 #       pip install torch（CPU 轮子）+ matplotlib/pillow/ruff/pytest/PyQt6
 #       pip install -e .                 # MinGW 构建 core + 扩展
 # 实测耗时：113 s（含首次下载/编译）
-python check.py all                     # 实测 96 s
+python check.py all                     # 实测 80 s，退出码 0
 ```
 
 关键输出（节选）：
 
 ```text
-[ci]   configure  ok       4.62s
-[ci]   build      ok       1.94s
-[ci]   test       ok       1.43s        # ctest 1/1 passed, snake_core_tests
+[ci]   configure  ok       6.26s
+[ci]   build      ok       3.44s
+[ci]   test       ok       10.14s       # ctest 1/1 passed, snake_core_tests
 [standardize] processed: 28  changed: 0  unchanged: 28  failed: 0
-[FAIL] tidy: 14 个文件，0 个错误，2 个警告      # 见 §5
+[OK] tidy: 14 个文件，0 个错误，0 个警告
 [OK] cpd: 退出码=0，重复=否
 [SKIPPED] valgrind: Windows 上没有原生 Valgrind ...
-105 passed, 4 skipped in 26.12s
+105 passed, 4 skipped in 19.46s
 All checks passed!                              # ruff
 [check] summary:
-  core: FAILED
+  core: passed
   python: passed
   lint: passed
+[check] passed
+```
+
+tidy 报告头会记录 MinGW 兼容参数，便于核对：
+
+```text
+# 文件: 14  配置: .clang-tidy  编译库外跳过: 0
+# MinGW 兼容参数: --extra-arg=--target=x86_64-w64-windows-gnu --extra-arg=--gcc-toolchain=C:/msys64/ucrt64
 ```
 
 扩展模块自包含验证：`objdump -p _snake_core.cp314-win_amd64.pyd` 的依赖只有
