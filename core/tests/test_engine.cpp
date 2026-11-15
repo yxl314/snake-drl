@@ -382,9 +382,13 @@ void test_invalid_config() {
   expect_invalid(config);
 
   config = snake::VecConfig{};
+  // 刻意构造非法枚举值，验证引擎的校验会拒绝；clang-analyzer 的 opt-in 检查
+  // 无法区分“测试输入”和“真实误用”，显式豁免。
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   config.autoreset_mode = static_cast<snake::AutoresetMode>(3);
   expect_invalid(config);
   config = snake::VecConfig{};
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
   config.obs_mode = static_cast<snake::ObsMode>(9);
   expect_invalid(config);
 

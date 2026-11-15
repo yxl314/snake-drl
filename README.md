@@ -11,6 +11,8 @@ A batched snake engine written in C++, plus a modular deep-RL layer on top of it
 - **Devices**: CPU and CUDA, with the data pipeline written to avoid allocation,
   synchronization and thread-oversubscription hazards.
 - **Human play**: PyQt6 front-end (`snake-play`).
+- **Platforms**: Linux and Windows (native Python + MinGW-w64 UCRT64; the
+  extension module is self-contained and needs no MSYS2 runtime at import).
 
 ```text
 core/                 C++ engine (framework-agnostic, no CUDA)
@@ -33,7 +35,8 @@ python/snake_drl/     engine re-export, DRL layer and play mode
 configs/              example YAML configs
 docs/                 design document (Chinese) with benchmark data
 tests/                pytest suite (CPU, ~2 min)
-check.sh              repo gate: core + pytest + ruff (`all|core|python|lint`)
+check.py              repo gate: core + pytest + ruff (`all|core|python|lint`)
+check.sh              POSIX wrapper: exec python3 check.py "$@"
 ```
 
 ## Build
@@ -41,6 +44,15 @@ check.sh              repo gate: core + pytest + ruff (`all|core|python|lint`)
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[plot,play,dev]"
+```
+
+On Windows (cmd/PowerShell) use the same commands with the platform's paths; the
+extension is built with MinGW-w64 from MSYS2 UCRT64 (g++ 16+, CMake 3.20+,
+Ninja), which must be on `PATH` while installing/rebuilding:
+
+```powershell
+py -m venv .venv
+.venv\Scripts\pip install -e ".[plot,play,dev]"
 ```
 
 The extras are optional: `plot` adds matplotlib/Pillow for report charts, `play`
@@ -205,7 +217,22 @@ mypy python/snake_drl                        # 49 files, Qt front-end excluded
 
 From the repository root, `./check.sh [all|core|python|lint]` runs the Python
 suite, ruff (skipped when it is not installed) and `core/check.sh all` behind one
-per-stage summary; it needs the `.venv` created in *Build*.
+per-stage summary; it needs the `.venv` created in *Build*. `check.sh` is only a
+POSIX wrapper around `check.py`, so Windows runs the same gate without a shell:
+
+```powershell
+python check.py all          # core + pytest + ruff, same exit codes
+```
+
+The C++ stage locates `cxx_ci`/`cxx_audit` checkouts next to this repository and
+expects `clang-tidy`/`clang-format` **21.x** on `PATH` (the versions the gate is
+tuned for; MSYS2 UCRT64 ships 23.x, whose newer checks add version-specific
+warnings). On Windows the PyPI wheels are enough —
+`pip install clang-tidy==21.1.6 clang-format==21.1.8` — and the Python `Scripts`
+directory must come before MSYS2 in `PATH`. CPD additionally needs `pmd` and
+`java` on `PATH`; both are skipped with a reason when missing. Valgrind is
+POSIX-only and is skipped on Windows. See
+[docs/windows支持.md](docs/windows支持.md) for the Windows verification matrix.
 
 Covers config validation (strict unknown-key rejection, override precedence), all
 six encoders, policy/head math, buffer wraparound, prioritized-sampling

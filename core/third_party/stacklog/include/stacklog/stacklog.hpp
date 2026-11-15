@@ -31,11 +31,14 @@ enum class level
 /// @brief 日志运行参数。
 ///
 /// init 会拒绝空目录、空基础名和零上限的配置。
+/// Windows 上目录和基础名按 UTF-8 解释，库内部转 UTF-16 调用宽字符文件 API。
 struct config
 {
-    /// @brief 日志目录。
+    /// @brief 日志目录；Windows 上按 UTF-8 解释。
     std::string dir = "logs";
     /// @brief 日志基础名；现行文件为目录下的 @c base_name.log，归档文件带序号后缀。
+    ///
+    /// Windows 上按 UTF-8 解释。
     std::string base_name = "app";
     /// @brief 单个日志文件的最大字节数；超过后轮转。
     std::uint64_t max_file_size = 5ULL * 1024 * 1024;
@@ -72,6 +75,7 @@ struct trace_frame
 /// @return 配置合法且目录与文件均就绪时为 true。
 /// @note 可重复调用，每次都会关闭已有文件并重建状态。
 /// @note 目录为空、基础名为空或任一上限为零时初始化失败。
+/// @note Windows 上路径按 UTF-8 解释；含非法 UTF-8 字节时初始化失败。
 bool init(const config& cfg = config());
 
 /// @brief 关闭日志文件；可重复调用。

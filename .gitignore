@@ -26,3 +26,6 @@ test-logs/
 standardize.diff
 .standardize/
 logs/
+
+# ruff 的本地缓存
+.ruff_cache/

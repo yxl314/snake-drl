@@ -12,7 +12,11 @@
 #include <vector>
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <direct.h>
+#include <windows.h>
 #endif
 #include <sys/stat.h>
 
@@ -64,11 +68,43 @@ logger_state& state()
     return *instance;
 }
 
+#ifdef _WIN32
+/// 把 UTF-8 路径转换为 Windows 宽字符路径；含无效 UTF-8 时返回 false。
+///
+/// 公开接口里的 std::string 路径按 UTF-8 约定；Windows 窄字符文件 API 走
+/// ANSI 代码页，遇到中文目录会失败，所以文件操作统一转 UTF-16 后调用宽字符接口。
+bool utf8_to_wide(const std::string& path, std::wstring& wide)
+{
+    if (path.empty())
+    {
+        wide.clear();
+        return true;
+    }
+
+    const int length =
+        ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), nullptr, 0);
+    if (length <= 0)
+    {
+        return false;
+    }
+
+    wide.resize(static_cast<std::wstring::size_type>(length));
+    // C++11 的 std::wstring::data() 只返回 const wchar_t*，写入需要可写缓冲区；
+    // C++17 起才能直接使用 wide.data()。
+    wchar_t* buffer = &wide[0]; // NOLINT(readability-container-data-pointer): C++11 的 data() 只读
+    return ::MultiByteToWideChar(
+               CP_UTF8, MB_ERR_INVALID_CHARS, path.data(), static_cast<int>(path.size()), buffer, length) == length;
+}
+#endif
+
 bool path_exists(const std::string& path)
 {
 #ifdef _WIN32
-    struct _stat info;
-    return _stat(path.c_str(), &info) == 0;
+    // 用 _stat64 而不是 _stat：后者在 Windows 上 st_size 只有 32 位，
+    // 超过 2 GiB 的日志文件会让大小检查失真。
+    std::wstring wide;
+    struct _stat64 info;
+    return utf8_to_wide(path, wide) && _wstat64(wide.c_str(), &info) == 0;
 #else
     struct stat info;
     return ::stat(path.c_str(), &info) == 0;
@@ -78,8 +114,9 @@ bool path_exists(const std::string& path)
 bool regular_file_size(const std::string& path, std::uint64_t& size)
 {
 #ifdef _WIN32
-    struct _stat info;
-    if (_stat(path.c_str(), &info) != 0 || (info.st_mode & _S_IFMT) != _S_IFREG)
+    std::wstring wide;
+    struct _stat64 info;
+    if (!utf8_to_wide(path, wide) || _wstat64(wide.c_str(), &info) != 0 || (info.st_mode & _S_IFMT) != _S_IFREG)
     {
         return false;
     }
@@ -104,7 +141,18 @@ bool open_append_locked(logger_state& logger)
         logger.file.close();
     }
     logger.file.clear();
+#ifdef _WIN32
+    std::wstring wide;
+    if (!utf8_to_wide(logger.path, wide))
+    {
+        return false;
+    }
+    // C++11 标准没有 wchar_t 路径的流重载；MinGW 的 libstdc++ 与 MSVC STL 都
+    // 提供该非标准扩展（MSVC 文档中的 basic_ofstream(const wchar_t*)）。
+    logger.file.open(wide.c_str(), std::ios::out | std::ios::app | std::ios::binary);
+#else
     logger.file.open(logger.path.c_str(), std::ios::out | std::ios::app | std::ios::binary);
+#endif
     if (!logger.file.is_open())
     {
         return false;
@@ -214,7 +262,12 @@ std::string join_path(const std::string& dir, const std::string& name)
     {
         return dir + name;
     }
+#ifdef _WIN32
+    // Windows 的 \\?\ 扩展长度路径不做 '/' 归一化，路径拼接必须用反斜杠。
+    return dir + "\\" + name;
+#else
     return dir + "/" + name;
+#endif
 }
 
 bool make_one_dir(const std::string& path)
@@ -223,23 +276,132 @@ bool make_one_dir(const std::string& path)
     {
         return true;
     }
+    // 已存在（含盘符根目录、UNC 共享根）直接视为成功，避免对根路径调用 mkdir。
+    if (path_exists(path))
+    {
+        return true;
+    }
 #ifdef _WIN32
-    const int result = _mkdir(path.c_str());
+    std::wstring wide;
+    if (!utf8_to_wide(path, wide))
+    {
+        return false;
+    }
+    const int result = _wmkdir(wide.c_str());
 #else
     const int result = ::mkdir(path.c_str(), 0755);
 #endif
+    // Windows 的 _mkdir 在目录已存在时同样把 errno 置为 EEXIST。
     return result == 0 || errno == EEXIST;
 }
 
-bool make_dirs(const std::string& dir)
+/// 删除文件；路径不存在或删除失败返回 false。
+bool remove_file(const std::string& path)
 {
-    if (dir.empty() || dir == ".")
+#ifdef _WIN32
+    std::wstring wide;
+    return utf8_to_wide(path, wide) && _wremove(wide.c_str()) == 0;
+#else
+    return std::remove(path.c_str()) == 0;
+#endif
+}
+
+/// 重命名文件；调用方需保证目标路径不存在，Windows 的 rename 不会覆盖已有文件。
+bool rename_file(const std::string& from, const std::string& to)
+{
+#ifdef _WIN32
+    std::wstring wide_from;
+    std::wstring wide_to;
+    return utf8_to_wide(from, wide_from) && utf8_to_wide(to, wide_to) &&
+           _wrename(wide_from.c_str(), wide_to.c_str()) == 0;
+#else
+    return std::rename(from.c_str(), to.c_str()) == 0;
+#endif
+}
+
+#ifdef _WIN32
+/// 判断路径是否以 \\?\ 扩展长度前缀开头。
+bool has_extended_prefix(const std::string& path)
+{
+    return path.size() >= 4 && path[0] == '\\' && path[1] == '\\' && path[2] == '?' && path[3] == '\\';
+}
+
+/// 判断去掉末尾分隔符后的路径是否是盘符根（"C:" 或 "\\?\C:"）。
+bool is_drive_root(const std::string& path)
+{
+    if (path.size() == 2 && path[1] == ':')
+    {
+        return true;
+    }
+    return path.size() == 6 && has_extended_prefix(path) && path[5] == ':';
+}
+
+/// 判断是否是 UNC 共享根（"\\\\server\\share"）：服务器名和共享名由系统提供。
+bool is_unc_root(const std::string& path)
+{
+    if (path.size() < 3 || (path[0] != '\\' && path[0] != '/') || (path[1] != '\\' && path[1] != '/'))
+    {
+        return false;
+    }
+    // \\?\ 是扩展长度路径前缀，不是 UNC 服务器名。
+    if (has_extended_prefix(path))
+    {
+        return false;
+    }
+    const std::string::size_type server_end = path.find_first_of("/\\", 2);
+    if (server_end == std::string::npos)
+    {
+        return false;
+    }
+    return std::string::npos == path.find_first_of("/\\", server_end + 1);
+}
+#endif
+
+bool make_dirs(const std::string& directory)
+{
+    if (directory.empty() || directory == ".")
     {
         return true;
     }
 
-    // 逐级创建父目录；跳过根目录和 Windows 盘符。
-    for (std::string::size_type i = 1; i < dir.size(); ++i)
+    // 末尾分隔符会让 Windows 的 _mkdir 失败；逐级创建前先去掉（保留根路径）。
+    std::string dir = directory;
+    while (dir.size() > 1 && (dir[dir.size() - 1] == '/' || dir[dir.size() - 1] == '\\'))
+    {
+        dir.erase(dir.size() - 1);
+    }
+
+#ifdef _WIN32
+    // 盘符根和 UNC 共享根是系统提供的已存在根：只校验存在性，不能调用 mkdir。
+    // 尤其 "C:" 交给 _wmkdir 只会得到 EEXIST，靠 errno 兜底既脆弱又可能掩盖真实错误。
+    if (is_drive_root(dir))
+    {
+        return path_exists(dir + "\\");
+    }
+    if (is_unc_root(dir))
+    {
+        return path_exists(dir);
+    }
+#endif
+
+    // 逐级创建父目录；跳过根目录、Windows 盘符和 UNC 路径的服务器/共享名。
+    std::string::size_type start = 1;
+#ifdef _WIN32
+    if (dir.size() >= 2 && dir[1] == ':')
+    {
+        // C:\dir 或 C:/dir：盘符本身不创建。
+        start = 2;
+    }
+    else if (dir.size() >= 2 && (dir[0] == '\\' || dir[0] == '/') && (dir[1] == '\\' || dir[1] == '/'))
+    {
+        // \\server\share\dir：服务器名与共享名由系统解析，只创建共享之后的目录。
+        const std::string::size_type server_end = dir.find_first_of("/\\", 2);
+        const std::string::size_type share_end =
+            (server_end == std::string::npos) ? std::string::npos : dir.find_first_of("/\\", server_end + 1);
+        start = (share_end == std::string::npos) ? dir.size() : share_end + 1;
+    }
+#endif
+    for (std::string::size_type i = start; i < dir.size(); ++i)
     {
         const char ch = dir[i];
         if (ch != '/' && ch != '\\')
@@ -247,7 +409,7 @@ bool make_dirs(const std::string& dir)
             continue;
         }
         const std::string parent = dir.substr(0, i);
-        if (parent.empty() || parent == "/" || (parent.size() == 2 && parent[1] == ':'))
+        if (parent.empty() || parent == "/" || parent == "\\" || (parent.size() == 2 && parent[1] == ':'))
         {
             continue;
         }
@@ -371,7 +533,7 @@ void rotate_locked(logger_state& logger)
     if (logger.options.max_files > 0)
     {
         const std::string oldest = base + "." + std::to_string(logger.options.max_files);
-        if (path_exists(oldest) && std::remove(oldest.c_str()) != 0)
+        if (path_exists(oldest) && !remove_file(oldest))
         {
             ok = false;
         }
@@ -386,12 +548,12 @@ void rotate_locked(logger_state& logger)
                 {
                     continue;
                 }
-                if (path_exists(to) && std::remove(to.c_str()) != 0)
+                if (path_exists(to) && !remove_file(to))
                 {
                     ok = false;
                     break;
                 }
-                if (std::rename(from.c_str(), to.c_str()) != 0)
+                if (!rename_file(from, to))
                 {
                     ok = false;
                     break;
@@ -402,8 +564,7 @@ void rotate_locked(logger_state& logger)
         if (ok && path_exists(base))
         {
             const std::string first = base + ".1";
-            if ((path_exists(first) && std::remove(first.c_str()) != 0) ||
-                std::rename(base.c_str(), first.c_str()) != 0)
+            if ((path_exists(first) && !remove_file(first)) || !rename_file(base, first))
             {
                 ok = false;
             }
@@ -462,6 +623,19 @@ bool init(const config& cfg)
     }
 
     logger.path = join_path(cfg.dir, cfg.base_name + ".log");
+
+#ifdef _WIN32
+    // Windows 需要把整条路径转成 UTF-16；非法 UTF-8 必须在创建目录之前失败，
+    // 否则 init 返回 false 却会留下一个空目录。
+    {
+        std::wstring wide;
+        if (!utf8_to_wide(logger.path, wide))
+        {
+            (void)std::fprintf(stderr, "stacklog: 路径不是合法 UTF-8，初始化失败\n");
+            return false;
+        }
+    }
+#endif
 
     if (!make_dirs(cfg.dir))
     {

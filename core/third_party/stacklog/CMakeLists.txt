@@ -16,7 +16,11 @@ target_include_directories(stacklog PUBLIC
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(stacklog PRIVATE -Wall -Wextra -Wpedantic)
-
+elseif(MSVC)
+  # 与上游 Windows 支持一致：/W4 严格告警，/utf-8 固定源码与执行字符集（本库
+  # 源码含中文注释与错误文本，不依赖系统代码页）；不加 /WX，第三方头文件的
+  # 告警不阻断构建。
+  target_compile_options(stacklog PRIVATE /W4 /utf-8)
 endif()
 
 find_package(Threads REQUIRED)
