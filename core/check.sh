@@ -21,16 +21,16 @@ run() {
 
 case "$STAGE" in
     all)
-        run python3 "$TOOLS/cxx_ci/ci/ci.py" --jobs "$JOBS"
-        run python3 "$TOOLS/cxx_ci/standardize/standardize.py" --check --jobs "$JOBS"
+        run python3 "$TOOLS/cxx_ci/check.py" ci --root "$ROOT" --jobs "$JOBS"
+        run python3 "$TOOLS/cxx_ci/check.py" style --root "$ROOT" --jobs "$JOBS"
         run env PYTHONPATH="$TOOLS/cxx_audit/src" python3 -m cpp_audit -c audit.toml \
             --jobs "$JOBS" all
         ;;
     ci)
-        run python3 "$TOOLS/cxx_ci/ci/ci.py" --jobs "$JOBS"
+        run python3 "$TOOLS/cxx_ci/check.py" ci --root "$ROOT" --jobs "$JOBS"
         ;;
     style)
-        run python3 "$TOOLS/cxx_ci/standardize/standardize.py" --check --jobs "$JOBS"
+        run python3 "$TOOLS/cxx_ci/check.py" style --root "$ROOT" --jobs "$JOBS"
         ;;
     audit)
         run env PYTHONPATH="$TOOLS/cxx_audit/src" python3 -m cpp_audit -c audit.toml \

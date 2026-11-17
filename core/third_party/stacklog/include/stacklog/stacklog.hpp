@@ -25,7 +25,7 @@ enum class level
     info = 1,
     warn = 2,
     error = 3,
-    off = 4
+    off = 4,
 };
 
 /// @brief 日志运行参数。

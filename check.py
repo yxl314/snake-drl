@@ -11,9 +11,9 @@ POSIX 的 ``check.sh`` 只是调用本脚本的薄壳；Windows（cmd/PowerShell
 Windows 与 POSIX 的差异只有两处，都收在本文件里：
 
 * C++ 核心阶段：POSIX 直接跑 ``core/check.sh all``（保持旧输出与行为）；
-  Windows 没有 ``sh``，等价地逐条运行它内部的三个命令（cxx_ci 的 ci 与
-  standardize、cxx_audit 的 cpp_audit）。两个工具都只依赖 Python 标准库，
-  所以用当前解释器即可。
+  Windows 没有 ``sh``，等价地逐条运行它内部的三个命令（cxx_ci 的
+  ``check.py ci|style``、cxx_audit 的 cpp_audit）。两个工具都只依赖 Python
+  标准库，所以用当前解释器即可。
 * venv 位置：Windows 是 ``.venv/Scripts/python.exe``，POSIX 是
   ``.venv/bin/python``。CI 或沙箱环境里 venv 不在仓库内时，用环境变量
   ``SNAKE_DRL_PYTHON`` 指向解释器即可。
@@ -157,14 +157,24 @@ def gate_core(root: Path, jobs: int) -> bool:
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = str(audit_src) + (os.pathsep + existing if existing else "")
     ok = run(
-        [sys.executable, str(tools / "cxx_ci" / "ci" / "ci.py"), "--jobs", str(jobs)],
+        [
+            sys.executable,
+            str(tools / "cxx_ci" / "check.py"),
+            "ci",
+            "--root",
+            str(core),
+            "--jobs",
+            str(jobs),
+        ],
         cwd=core,
     )
     ok &= run(
         [
             sys.executable,
-            str(tools / "cxx_ci" / "standardize" / "standardize.py"),
-            "--check",
+            str(tools / "cxx_ci" / "check.py"),
+            "style",
+            "--root",
+            str(core),
             "--jobs",
             str(jobs),
         ],

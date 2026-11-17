@@ -16,6 +16,7 @@
 #   bugprone-narrowing-conversions          int ↔ size_t 转换在本库是刻意的
 #   cert-err58-cpp                         静态局部对象的构造顺序与日志无关
 #   cert-msc32-c / cert-msc51-cpp          固定种子是设计要求（同 seed 必须复现）
+#   bugprone-random-generator-seed         同上：固定种子是测试复现的前提
 #   performance-enum-size                  枚举保持默认底层类型
 #   modernize-use-trailing-return-type     纯风格，与现有写法冲突
 #   modernize-use-std-print                需要 C++23，本项目是 C++17
@@ -30,6 +31,7 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -cert-msc32-c,
   -cert-msc51-cpp,
+  -bugprone-random-generator-seed,
   -bugprone-narrowing-conversions,
   -cert-err58-cpp,
   -modernize-use-trailing-return-type,

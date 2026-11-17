@@ -1,7 +1,7 @@
 # cxx_ci 配置 —— snake-drl 的 C++ 核心
 #
 # 在 core/ 目录运行：
-#     python3 ../../cxx_ci/ci/ci.py -c ci.toml
+#     python3 ../../cxx_ci/check.py ci --root .
 #
 # 项目是 CPU-only 的 C++17 库，构建系统 CMake，测试走 ctest。
 name = "snake-core"

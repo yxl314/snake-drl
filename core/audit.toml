@@ -1,7 +1,7 @@
 # cxx_audit 配置 —— snake-drl 的 C++ 核心
 #
 # 在 core/ 目录运行：
-#     PYTHONPATH=../../../cxx_audit/src python3 -m cpp_audit -c audit.toml all
+#     PYTHONPATH=../../cxx_audit/src python3 -m cpp_audit -c audit.toml all
 [project]
 name = "snake-core"
 root = "."

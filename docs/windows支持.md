@@ -64,9 +64,10 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
    `PATH`，动态依赖这些运行库会让 `import snake_drl` 直接报 "DLL load failed"
    （除非用户手工 `os.add_dll_directory` 或安装 MSYS2 运行时）。静态链接后
    `objdump -p` 只剩 `KERNEL32`、系统 UCRT `api-ms-win-crt-*` 与 `python314.dll`。
-3. **vendored stacklog 同步上游 `d96bcfa`**：带 UTF-8→UTF-16 路径转换、Windows
-   轮转与 CTest 支持；内嵌副本的 `CMakeLists.txt` 增加上游一致的 MSVC `/W4 /utf-8`
-   分支（MinGW/g++ 不需要额外选项）。
+3. **vendored stacklog 同步上游 `0189fe3`**：平台层拆分（`platform_posix.cpp` /
+   `platform_win32.cpp`，公开 API 不变），带 UTF-8→UTF-16 路径转换、Windows
+   轮转与 CTest 支持；内嵌副本的 `CMakeLists.txt` 按平台选择适配器，并保留上游
+   一致的 MSVC `/W4 /utf-8` 分支（MinGW/g++ 不需要额外选项）。
 4. **clang-tidy opt-in 检查的测试豁免**：`core/tests/test_engine.cpp` 里有两处
    “故意构造非法枚举值”的输入，clang-tidy 21 的
    `clang-analyzer-optin.core.EnumCastOutOfRange` 会误报。加了带理由的
