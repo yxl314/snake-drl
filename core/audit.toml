@@ -39,11 +39,14 @@ extra_args = ["--extra-arg=-I../../cmake",
 # 组内检查项由 cxx_audit 维护，升级工具时只需复核这里的开关。
 #
 # 选组口径：覆盖原 .clang-tidy 里实际启用的 clang-analyzer-* / bugprone-* /
-# performance-* / portability-* 与编译告警，同时避开会让项目历史豁免失效的组：
+# performance-* 检查，同时避开会让项目历史豁免失效或引入工具自身噪音的组：
 #   - modernize / style：会把 global 关闭的 modernize-use-trailing-return-type、
 #     readability-* 等一次性放出来，噪音远大于收益；
 #   - integer：组内 bugprone-narrowing-conversions 正是本项目刻意豁免的项；
-#   - bounds_ub：引入从未启用的 cppcoreguidelines-pro-bounds-* 检查。
+#   - bounds_ub：引入从未启用的 cppcoreguidelines-pro-bounds-* 检查；
+#   - compiler_warnings：cxx-audit 在 Windows/MinGW 上会自行追加
+#     --gcc-toolchain，clang 把这当成 unused argument（clang-diagnostic-*），
+#     与项目代码无关；编译告警由构建阶段本身负责。
 # 个别仍需豁免的点用 NOLINTNEXTLINE 就地标注（见 tests/）。
 null_pointer = true
 uninitialized = true
@@ -51,7 +54,6 @@ memory = true
 lifetime = true
 common_bugs = true
 performance = true
-compiler_warnings = true
 
 [cpd]
 enabled = true

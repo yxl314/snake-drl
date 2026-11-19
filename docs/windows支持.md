@@ -76,9 +76,10 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
 4. **clang-tidy 检查集迁移到组开关**：新版 cxx_audit 只认 `audit.toml` 的
    `[tidy.groups]`（不再读取项目 `.clang-tidy`）。按原 `.clang-tidy` 的实际启用
    范围选择组：null_pointer / uninitialized / memory / lifetime / common_bugs /
-   performance / compiler_warnings；modernize、style、integer、bounds_ub 会让
-   项目全局豁免的项（trailing-return-type、narrowing-conversions 等）重新生效，
-   故不启用。组内 `bugprone-*` 比旧的逐项豁免范围更宽，测试里固定随机种子
+   performance；modernize、style、integer、bounds_ub 会让项目全局豁免的项
+   （trailing-return-type、narrowing-conversions 等）重新生效，compiler_warnings
+   会把 cxx-audit 在 MinGW 上自行追加的 `--gcc-toolchain` 当成 unused argument
+   报噪声，故均不启用。组内 `bugprone-*` 比旧的逐项豁免范围更宽，测试里固定随机种子
    （6 处）和按位置传参的测试辅助函数（4 处）改用带理由的 `NOLINTNEXTLINE`
    就地豁免；另有 2 处“故意构造非法枚举值”的 opt-in 检查豁免保持不变。
    Linux clang-tidy 22 与 Windows clang-tidy 21 下均为 0 告警（Linux 由

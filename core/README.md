@@ -51,9 +51,10 @@ clang-tidy 检查集分两处维护，两者用途不同：
 
 - `audit.toml` 的 `[tidy.groups]`：`cxx-audit` 只认组开关，**不读取**项目的
   `.clang-tidy`；当前启用 null_pointer / uninitialized / memory / lifetime /
-  common_bugs / performance / compiler_warnings（覆盖原 `.clang-tidy` 中的
-  clang-analyzer、bugprone、performance 与编译告警；modernize/style/integer/
-  bounds_ub 组会重新引入本项目全局豁免的检查项，故不启用）。
+  common_bugs / performance（覆盖原 `.clang-tidy` 中的 clang-analyzer、
+  bugprone、performance；modernize/style/integer/bounds_ub 组会重新引入本项目
+  全局豁免的检查项，compiler_warnings 会把 cxx-audit 在 MinGW 上追加的
+  `--gcc-toolchain` 当成 unused argument 报噪声，故均不启用）。
 - `.clang-tidy`：供 `cxx-standardize` 的 clang-tidy 修复与编辑器使用；本项目是
   C++17，现代写法检查按该标准配置。
 
