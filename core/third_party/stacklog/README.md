@@ -14,14 +14,13 @@
 
 同步后本目录与上游的文件内容一致，只多一个**裁剪过的 `CMakeLists.txt`**：
 
-1. 额外提供 `snake::stacklog` 别名（`snake_core` 的链接名），同时保留上游的
-   `stacklog::stacklog` 别名；
-2. 静态库随 `snake_core` 的 `SnakeCoreTargets` 一起安装/导出，不生成独立的
-   stacklog CMake 包（上游顶层安装规则不适用）；
-3. 不注册上游的 tests/examples/benchmarks 子工程（这些目录不在副本内）；
-4. 保留上游 Windows 支持的 MSVC `/W4 /utf-8` 分支；MinGW/g++ 走
+1. 安装规则由上层项目负责：库与头文件随 `snake_core` 一起安装，目标以
+   `stacklog::stacklog` 进入独立的 `StacklogTargets` 导出集，由
+   `snake_coreConfig.cmake` 一并加载（不生成独立的 stacklog CMake 包）；
+2. 不注册上游的 tests/examples/benchmarks 子工程（这些目录不在副本内）；
+3. 保留上游 Windows 支持的 MSVC `/W4 /utf-8` 分支；MinGW/g++ 走
    `-Wall -Wextra -Wpedantic`；
-5. 打开 `POSITION_INDEPENDENT_CODE`：本库内部有 `thread_local` 状态，
+4. 打开 `POSITION_INDEPENDENT_CODE`：本库内部有 `thread_local` 状态，
    `snake_core` 会被链进 Python 扩展 `.so`，非 PIC 的 TLS 访问会产生
    local-exec 重定位，链接器直接报错。
 

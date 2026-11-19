@@ -6,11 +6,11 @@ cmake_minimum_required(VERSION 3.16)
 # include/、src/、cmake/ 与本文，文件内容保持上游一致。
 #
 # 与上游 CMakeLists.txt 的差异（保持 snake_core 集成）：
-#   1. 额外提供 snake::stacklog 别名（snake_core 公开的链接名）；
-#   2. 本副本随 snake_core 的 SnakeCoreTargets 一起安装/导出，安装规则由上层
-#      项目负责，不生成独立的 stacklog CMake 包；
-#   3. 上游的 tests/examples/benchmarks 子工程不随本副本分发，故不注册；
-#   4. 保留 MSVC 的 /W4 /utf-8 分支（上游 Windows 支持的约定），MinGW/g++ 走
+#   1. 安装规则由上层项目负责：库与头文件随 snake_core 一起安装，目标以
+#      stacklog:: 命名空间进入独立的 StacklogTargets 导出集，由
+#      snake_coreConfig.cmake 一并加载；
+#   2. 上游的 tests/examples/benchmarks 子工程不随本副本分发，故不注册；
+#   3. 保留 MSVC 的 /W4 /utf-8 分支（上游 Windows 支持的约定），MinGW/g++ 走
 #      -Wall -Wextra -Wpedantic。
 project(stacklog
     VERSION 0.2.0
@@ -32,8 +32,6 @@ endif()
 
 add_library(stacklog STATIC src/stacklog.cpp ${STACKLOG_PLATFORM_SOURCE})
 add_library(stacklog::stacklog ALIAS stacklog)
-# snake_core 以 snake::stacklog 链接（见 core/CMakeLists.txt）。
-add_library(snake::stacklog ALIAS stacklog)
 
 # 静态库也要位置无关：本库持有 thread_local 状态，被链进共享对象（例如
 # Python 扩展 .so）时，非 PIC 的目标文件会产生 local-exec 的 TLS 重定位，
@@ -58,10 +56,15 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(stacklog PUBLIC Threads::Threads)
 
-# 随 snake_core 一起导出：snake_core 以 PRIVATE 方式静态链接它，链接期仍需
-# 该目标可见，所以必须进同一个导出集（安装/导出规则由上层项目负责）。
+# snake_core 以 PRIVATE 方式静态链接它，链接期仍需该目标可见；安装时用独立
+# 导出集与上游命名空间导出，snake_coreConfig.cmake 负责在 SnakeCoreTargets
+# 之前加载它（安装/导出规则由上层项目负责）。
 install(TARGETS stacklog
-    EXPORT SnakeCoreTargets
+    EXPORT StacklogTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/stacklog DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(EXPORT StacklogTargets
+    FILE stacklogTargets.cmake
+    NAMESPACE stacklog::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/stacklog)

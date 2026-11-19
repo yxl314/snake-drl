@@ -3,6 +3,8 @@
 include(CMakeFindDependencyMacro)
 find_dependency(Threads)
 
+# 内嵌 stacklog 以 stacklog:: 命名空间导出，snake_core 的静态链接需要它先可见。
+include("${CMAKE_CURRENT_LIST_DIR}/../stacklog/stacklogTargets.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/SnakeCoreTargets.cmake")
 
 check_required_components(snake_core)

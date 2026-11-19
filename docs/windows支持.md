@@ -69,9 +69,10 @@ SKIPPED 并打印原因，不算失败）。`check.py` 的 venv 查找顺序是
    `include/`、`src/`、`cmake/`、`CMakeLists.txt` 与 `LICENSE`；平台层拆分
    （`platform_posix.cpp` / `platform_win32.cpp`，公开 API 不变）与 UTF-8→UTF-16
    路径转换、Windows 轮转支持保持不变。内嵌副本的 `CMakeLists.txt` 在上游基础上
-   只做 snake_core 集成适配（`snake::stacklog` 别名、随 SnakeCoreTargets 导出、
-   不注册上游 tests/examples/benchmarks），并保留上游一致的 MSVC `/W4 /utf-8`
-   分支（MinGW/g++ 不需要额外选项）。
+   只做 snake_core 集成适配（以上游 `stacklog::stacklog` 名称进入独立的
+   `StacklogTargets` 导出集、随 snake_core 一起安装、不注册上游
+   tests/examples/benchmarks），并保留上游一致的 MSVC `/W4 /utf-8` 分支
+   （MinGW/g++ 不需要额外选项）。
 4. **clang-tidy 检查集迁移到组开关**：新版 cxx_audit 只认 `audit.toml` 的
    `[tidy.groups]`（不再读取项目 `.clang-tidy`）。按原 `.clang-tidy` 的实际启用
    范围选择组：null_pointer / uninitialized / memory / lifetime / common_bugs /

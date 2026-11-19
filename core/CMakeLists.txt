@@ -54,7 +54,7 @@ find_package(Threads REQUIRED)
 # 日志是内部实现细节：公开头文件不含 stacklog，所以 PRIVATE 链接。
 target_link_libraries(snake_core
   PUBLIC Threads::Threads
-  PRIVATE snake::stacklog)
+  PRIVATE stacklog::stacklog)
 
 if(SNAKE_BUILD_TESTS)
   enable_testing()
@@ -70,7 +70,7 @@ if(SNAKE_BUILD_TESTS)
     tests/support/test_access.cpp
   )
   # snake_core 以 PRIVATE 链 stacklog，测试直接调用 init/shutdown，需要显式链接。
-  target_link_libraries(snake_core_tests PRIVATE snake_core snake::stacklog)
+  target_link_libraries(snake_core_tests PRIVATE snake_core stacklog::stacklog)
   target_include_directories(snake_core_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/tests
