@@ -227,7 +227,9 @@ python check.py all          # core + pytest + ruff, same exit codes
 The C++ stage locates `cxx_ci`/`cxx_audit` checkouts next to this repository and
 expects `clang-tidy`/`clang-format` **21.x** on `PATH` (the versions the gate is
 tuned for; MSYS2 UCRT64 ships 23.x, whose newer checks add version-specific
-warnings). On Windows the PyPI wheels are enough —
+warnings). `cxx-audit` selects its clang-tidy checks from `core/audit.toml`'s
+`[tidy.groups]` (it no longer reads `core/.clang-tidy`, which remains for
+`cxx-standardize` and editors). On Windows the PyPI wheels are enough —
 `pip install clang-tidy==21.1.6 clang-format==21.1.8` — and the Python `Scripts`
 directory must come before MSYS2 in `PATH`. CPD additionally needs `pmd` and
 `java` on `PATH`; both are skipped with a reason when missing. Valgrind is

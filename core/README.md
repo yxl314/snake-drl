@@ -47,8 +47,19 @@ warning set (`-Wconversion`, `-Wsign-conversion`, ...) is on by default;
 三个工具来自同级目录（`../../cxx_ci`、`../../cxx_audit`），不安装到系统。
 `JOBS=` 可覆盖并行度，缺省为本机核数。
 
-检查集在 `.clang-tidy` 里，`modernize-*` 全面启用；本项目是 C++17，链接期
-相关检查按该标准配置。
+clang-tidy 检查集分两处维护，两者用途不同：
+
+- `audit.toml` 的 `[tidy.groups]`：`cxx-audit` 只认组开关，**不读取**项目的
+  `.clang-tidy`；当前启用 null_pointer / uninitialized / memory / lifetime /
+  common_bugs / performance / compiler_warnings（覆盖原 `.clang-tidy` 中的
+  clang-analyzer、bugprone、performance 与编译告警；modernize/style/integer/
+  bounds_ub 组会重新引入本项目全局豁免的检查项，故不启用）。
+- `.clang-tidy`：供 `cxx-standardize` 的 clang-tidy 修复与编辑器使用；本项目是
+  C++17，现代写法检查按该标准配置。
+
+组内检查项由 cxx_audit 维护，版本升级时只需复核组开关。个别需要豁免的代码点
+（测试里的固定随机种子、按位置传参的测试辅助函数）用带理由的
+`NOLINTNEXTLINE` 就地标注，不改检查集。
 
 ## 日志
 

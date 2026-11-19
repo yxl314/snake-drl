@@ -18,6 +18,8 @@
 
 namespace {
 
+// 测试构造参数按位置调用，类型可换是刻意的。
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 snake::VecConfig make_config(snake::AutoresetMode autoreset, snake::ObsMode obs, int num_envs,
                              int width, int height) {
   snake::VecConfig config;
@@ -44,6 +46,7 @@ std::vector<std::int8_t> random_actions(int count, std::mt19937& rng) {
   return actions;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- 测试压力入口按位置传参，类型可换是刻意的
 void stress(snake::ObsMode obs, snake::AutoresetMode autoreset, int num_envs, int width, int height,
             int steps, unsigned seed) {
   snake::VecSnake env(make_config(autoreset, obs, num_envs, width, height));
@@ -154,6 +157,8 @@ void test_determinism_and_threads() {
   snake::VecSnake serial_a(config);
   snake::VecSnake serial_b(config);
   snake::VecSnake parallel(parallel_config);
+  // 固定种子是测试复现的前提。
+  // NOLINTNEXTLINE(bugprone-random-generator-seed)
   std::mt19937 rng(777);
   const std::size_t rows =
       static_cast<std::size_t>(config.num_envs) * static_cast<std::size_t>(config.height);
@@ -180,6 +185,8 @@ void test_grid_bitboard_consistency() {
 
   snake::VecSnake grid(grid_config);
   snake::VecSnake bit(bit_config);
+  // 固定种子是测试复现的前提。
+  // NOLINTNEXTLINE(bugprone-random-generator-seed)
   std::mt19937 rng(999);
   const std::size_t rows =
       static_cast<std::size_t>(grid_config.num_envs) * static_cast<std::size_t>(grid_config.height);
@@ -281,6 +288,8 @@ void test_auto_threads() {
   snake::VecSnake env(config);
   CHECK(env.active_threads() == std::min(expected_auto, config.num_envs));
 
+  // 固定种子是测试复现的前提。
+  // NOLINTNEXTLINE(bugprone-random-generator-seed)
   std::mt19937 rng(321);
   for (int step = 0; step < 200; ++step) {
     const auto actions = random_actions(config.num_envs, rng);
@@ -484,6 +493,8 @@ void test_reseed() {
   snake::VecSnake env(config);
 
   // Move the engine away from its construction state, exercising autoresets.
+  // 固定种子是测试复现的前提。
+  // NOLINTNEXTLINE(bugprone-random-generator-seed)
   std::mt19937 rng(4242);
   for (int step = 0; step < 137; ++step) {
     const auto actions = random_actions(config.num_envs, rng);
@@ -1037,6 +1048,8 @@ void test_view_integration_matrix() {
 void test_extreme_boards() {
   for (auto obs : {snake::ObsMode::Grid, snake::ObsMode::Bitboard}) {
     snake::VecSnake env(make_config(snake::AutoresetMode::SameStep, obs, 2, 64, 64));
+    // 固定种子是测试复现的前提。
+    // NOLINTNEXTLINE(bugprone-random-generator-seed)
     std::mt19937 rng(777);
     for (int step = 0; step < 1000; ++step) {
       const auto actions = random_actions(2, rng);
@@ -1053,6 +1066,8 @@ void test_extreme_boards() {
     snake::VecConfig config = make_config(mode, snake::ObsMode::Grid, 2, 16, 16);
     config.initial_length = 1;
     snake::VecSnake env(config);
+    // 固定种子是测试复现的前提。
+    // NOLINTNEXTLINE(bugprone-random-generator-seed)
     std::mt19937 rng(778);
     for (int step = 0; step < 200; ++step) {
       const auto actions = random_actions(2, rng);

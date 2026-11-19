@@ -1,7 +1,7 @@
 # cxx_audit 配置 —— snake-drl 的 C++ 核心
 #
 # 在 core/ 目录运行：
-#     PYTHONPATH=../../cxx_audit/src python3 -m cpp_audit -c audit.toml all
+#     PYTHONPATH=../../cxx_audit/src python3 -m cxx_audit -c audit.toml all
 [project]
 name = "snake-core"
 root = "."
@@ -19,7 +19,8 @@ rules = []
 
 [tidy]
 enabled = true
-# 检查集在项目根的 .clang-tidy 里，现代化写法检查全面开启。
+# 检查集由下面的 [tidy.groups] 组开关生成；cxx_audit 不读取项目 .clang-tidy
+# （.clang-tidy 仍供 cxx-standardize 的 clang-tidy 修复与编辑器使用）。
 report = "reports/clang-tidy.txt"
 fail_on_warnings = true
 jobs = 24
@@ -33,6 +34,24 @@ jobs = 24
 extra_args = ["--extra-arg=-I../../cmake",
               "--extra-arg=-include",
               "--extra-arg=analysis_mingw_assert.h"]
+
+[tidy.groups]
+# 组内检查项由 cxx_audit 维护，升级工具时只需复核这里的开关。
+#
+# 选组口径：覆盖原 .clang-tidy 里实际启用的 clang-analyzer-* / bugprone-* /
+# performance-* / portability-* 与编译告警，同时避开会让项目历史豁免失效的组：
+#   - modernize / style：会把 global 关闭的 modernize-use-trailing-return-type、
+#     readability-* 等一次性放出来，噪音远大于收益；
+#   - integer：组内 bugprone-narrowing-conversions 正是本项目刻意豁免的项；
+#   - bounds_ub：引入从未启用的 cppcoreguidelines-pro-bounds-* 检查。
+# 个别仍需豁免的点用 NOLINTNEXTLINE 就地标注（见 tests/）。
+null_pointer = true
+uninitialized = true
+memory = true
+lifetime = true
+common_bugs = true
+performance = true
+compiler_warnings = true
 
 [cpd]
 enabled = true

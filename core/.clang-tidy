@@ -1,6 +1,9 @@
 ---
 # 本项目是 C++17 的 CPU-only 库，启用现代化写法检查。
 #
+# 用途：本文件供 cxx-standardize 的 clang-tidy 修复与编辑器使用；cxx-audit 的
+# 审计检查集由 core/audit.toml 的 [tidy.groups] 组开关生成，不读取本文件。
+#
 # 检查集：
 #   modernize-*   现代化改写（全面开启）
 #   bugprone-*    易错写法

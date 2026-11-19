@@ -10,6 +10,8 @@ namespace snake::detail {
 
 void VecSnakeTestAccess::place_snake(VecSnakeImpl& env,
                                      const std::vector<std::pair<int, int>>& cells,
+                                     // 测试辅助函数按位置调用，类型可换是刻意的。
+                                     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
                                      std::uint8_t dir, std::uint16_t food, int steps) {
   CHECK(env.num_envs() == 1);
   const int length = static_cast<int>(cells.size());
@@ -74,6 +76,7 @@ void VecSnakeTestAccess::force_food(VecSnakeImpl& env, std::uint16_t cell) {
   force_food(env, 0, cell);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- 测试辅助函数按位置调用，类型可换是刻意的
 void VecSnakeTestAccess::force_food(VecSnakeImpl& env, int env_index, std::uint16_t cell) {
   auto free = env.free_cells(env_index);
   const auto index = static_cast<std::size_t>(env_index);

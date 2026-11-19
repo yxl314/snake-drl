@@ -12,7 +12,7 @@ Windows 与 POSIX 的差异只有两处，都收在本文件里：
 
 * C++ 核心阶段：POSIX 直接跑 ``core/check.sh all``（保持旧输出与行为）；
   Windows 没有 ``sh``，等价地逐条运行它内部的三个命令（cxx_ci 的
-  ``check.py ci|style``、cxx_audit 的 cpp_audit）。两个工具都只依赖 Python
+  ``check.py ci|style``、cxx_audit 的 cxx-audit）。两个工具都只依赖 Python
   标准库，所以用当前解释器即可。
 * venv 位置：Windows 是 ``.venv/Scripts/python.exe``，POSIX 是
   ``.venv/bin/python``。CI 或沙箱环境里 venv 不在仓库内时，用环境变量
@@ -181,7 +181,7 @@ def gate_core(root: Path, jobs: int) -> bool:
         cwd=core,
     )
     ok &= run(
-        [sys.executable, "-m", "cpp_audit", "-c", "audit.toml", "--jobs", str(jobs), "all"],
+        [sys.executable, "-m", "cxx_audit", "-c", "audit.toml", "--jobs", str(jobs), "all"],
         cwd=core,
         env=env,
     )

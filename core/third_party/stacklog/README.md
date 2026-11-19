@@ -1,21 +1,32 @@
 # stacklog（内嵌副本）
 
-本目录是 [stacklog](../../../../stacklog) 的副本，随 `snake_core` 一起分发。
+本目录是 [stacklog](../../../../stacklog) 的使用子集，随 `snake_core` 一起分发。
 
-- 同步自上游 commit `0189fe3`（平台层拆分：核心 `stacklog.cpp` 不再含平台宏，
-  POSIX/Windows 适配器按平台分别编译；公开 API 与 0.2.0 版本不变）。
-- 版本见 `include/stacklog/version.hpp`
-- 许可见 `LICENSE`
-- 只构建静态库；安装与导出由上层项目负责
+- 同步自上游 commit `8fd01bc`（公开 API 与 0.2.0 版本不变；本次更新为上游
+  平台层拆分的后续排版/Doxygen 整理与 cxx 工具链配置统一）。
+- 只保留构建静态库实际需要的 `include/`、`src/`、`cmake/`、`CMakeLists.txt`
+  与 `LICENSE`；上游的 tests/、examples/、benchmarks/、docs/ 与门禁配置不随
+  snake-drl 分发。
+- 版本见 `include/stacklog/version.hpp`；许可见 `LICENSE`。
+- 只构建静态库；安装与导出由上层项目负责（见下面“与上游的差异”）。
 
-与上游相比只有两处差异：(a) 多一个只构建静态库的 `CMakeLists.txt`（按 `WIN32`
-选择 `src/platform_posix.cpp` 或 `src/platform_win32.cpp`）；(b) 该
-`CMakeLists.txt` 显式打开 `POSITION_INDEPENDENT_CODE`。原因：本库内部有
-`thread_local` 状态，`snake_core` 会被链进 Python 扩展 `.so`，非 PIC 的 TLS 访问
-会产生 local-exec 重定位，链接器直接报错。
+## 与上游的差异
 
-升级方式：从上游仓库重新拷贝 `include/`、`src/`、`LICENSE`，保持本目录只多出
-`CMakeLists.txt` 与这份说明。
+同步后本目录与上游的文件内容一致，只多一个**裁剪过的 `CMakeLists.txt`**：
+
+1. 额外提供 `snake::stacklog` 别名（`snake_core` 的链接名），同时保留上游的
+   `stacklog::stacklog` 别名；
+2. 静态库随 `snake_core` 的 `SnakeCoreTargets` 一起安装/导出，不生成独立的
+   stacklog CMake 包（上游顶层安装规则不适用）；
+3. 不注册上游的 tests/examples/benchmarks 子工程（这些目录不在副本内）；
+4. 保留上游 Windows 支持的 MSVC `/W4 /utf-8` 分支；MinGW/g++ 走
+   `-Wall -Wextra -Wpedantic`；
+5. 打开 `POSITION_INDEPENDENT_CODE`：本库内部有 `thread_local` 状态，
+   `snake_core` 会被链进 Python 扩展 `.so`，非 PIC 的 TLS 访问会产生
+   local-exec 重定位，链接器直接报错。
+
+升级方式：从上游仓库重新拷贝 `include/`、`src/`、`cmake/`、`LICENSE`，保持本目录
+只多出 `CMakeLists.txt` 与这份说明。
 
 ## Windows 要点（来自上游 `docs/windows支持.md`）
 
@@ -28,17 +39,18 @@
 - POSIX 专属场景（外部删除/替换已打开的文件、`/dev/full`、symlink）在 Windows
   不适用，上游测试已按 `_WIN32` 跳过；本目录只 vendor 库源码，不含 tests。
 
-校验同步内容可用 `git hash-object` 对比上游 commit `0189fe3`：
+校验同步内容可用 `git hash-object` 对比上游 commit `8fd01bc`：
 
 ```text
-include/stacklog/stacklog.hpp   db708904dec486929e2d5df3d12bd485fae67991
-include/stacklog/version.hpp    d5258796e2c594a67852f7bc635ad2ffa346bcde
-src/stacklog.cpp                c2f7d6fc1206da7e9a8dbe9a6b115410cdca3a1a
-src/platform.hpp                2e15c232f2cdfc0bc3474dde5e8911811535c72a
-src/platform_posix.cpp          cf9426ae076480a50990c61abc478365e8f382d1
-src/platform_win32.cpp          1de436880ee27205d1a11b4ad17fc8ac95bdf3e4
-src/platform_dirs.hpp           77821843b5a612ef8d389d9be1906b49e9283e2a
-src/platform_time.hpp           ea835305e152a30b5ac9ab5b3426bed6a522e6e9
-src/platform_paths.hpp          69b26cb0d1e2391bae6c8b2440dc5ee9bd709abb
-src/platform_stream.hpp         4222bf99e9df6e12ce8f80bc88e938640a084a4f
+include/stacklog/stacklog.hpp   034a515cfe8f9c55af0a30471f86a51cec7ed77a
+include/stacklog/version.hpp    f6afd8b3df4fd7ea90e761c9fee28bcdec9f5768
+src/stacklog.cpp                b0a79720bc7d8c8019b2e5bc3aa59b9a1781b9e9
+src/platform.hpp                518bf67309af86aeb5d6d3bcb51d197b0ef80eb1
+src/platform_posix.cpp          4af374314ea271aec9e4500441da0288a460d399
+src/platform_win32.cpp          858b0106e19c43e2d252f52f9707f943054ad151
+src/platform_dirs.hpp           2789872363e4a5c8da0f7d6ac3cc273e8143789d
+src/platform_time.hpp           7a49e517b8a752a3ca5a496d9b60377358c43d09
+src/platform_paths.hpp          ba04560202394e73c408a226f0e7b32c45ff7ddb
+src/platform_stream.hpp         bc5c2e93e3dc01b107f6ca4d8b5643d388ae89b3
+cmake/stacklogConfig.cmake.in   744510bf3e6e62a32872d4f4baf158bb9b3ca843
 ```
